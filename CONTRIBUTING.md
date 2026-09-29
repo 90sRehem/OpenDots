@@ -1,6 +1,6 @@
 # Contributing to OpenDots
 
-OpenDots is in early development. The required foundation is CopilotKit Intelligence, Threads, and Channels SDK. Focus changes on Spaces, Specialist Dots, Dottie-style text and calls, Slack, and inspectable background work. Do not add a silent standalone fallback that bypasses these dependencies.
+OpenDots is an application template in early development. Focus changes on Spaces, Specialist Dots, text and calls, Slack, and inspectable background work. Keep the documented SDK integrations functional and report missing configuration clearly.
 
 For bugs, include the app mode, Node version, steps to reproduce, expected behavior, and actual behavior. Remove credentials and private page content from logs or screenshots.
 
