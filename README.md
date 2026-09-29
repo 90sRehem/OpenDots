@@ -4,98 +4,135 @@
 
 ### A little dot. A lot off your plate.
 
-**An open-source work agent inspired by OpenAI Dots.**
+**An open-source work companion built on CopilotKit Intelligence, Threads, and Channels SDK.**
 
-Give your dot an ongoing responsibility. Follow its work, inspect its sources, and come back to the result.
+Organize your work into Spaces. Give Specialist Dots ongoing responsibilities. Pick up the conversation in text, on a call, or in Slack.
 
-[Get started](#get-started) · [Features](#features) · [How it works](#how-it-works) · [Roadmap](#roadmap) · [Contributing](CONTRIBUTING.md)
+[Product](#the-product) · [Architecture](#architecture) · [Status](#development-status) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
 ---
 
-OpenDots brings a persistent agent, its workspace, and its activity into one interface. An original blue companion keeps you oriented while tasks run; conversations, research results, memories, and schedules stay available between visits.
+OpenDots is inspired by [OpenAI Dots](https://help.openai.com/en/articles/20001530-getting-started-with-your-dot), with [OpenMuse](https://github.com/CopilotKit/OpenMuse) and [OpenBot](https://github.com/CopilotKit/openbot) as implementation references. It brings a persistent companion, specialist agents, conversations, and visible work into one interface.
 
-The first release focuses on **ongoing research**: give your dot a page to investigate, review a sourced result, and schedule it to check again. The server keeps working when you close the browser.
+> **Under development.** This README defines the product being built. The required CopilotKit integration and the features below are not yet a released, verified application. OpenDots is an independent implementation with its own branding and character.
 
-> **Early development.** This repository is being built and verified. The feature list below defines the first-release scope; it is not yet a claim of a published, validated release. OpenDots is an independent project, not an OpenAI product or a complete reproduction of Dots.
+## The product
 
-## Why OpenDots?
+### Spaces
 
-- **Work that continues.** Tasks and schedules live on the server, beyond an open chat window.
-- **Work you can inspect.** See task activity, source pages, results, and failures.
-- **A companion you control.** Choose its name, manage its memories, and pause its work.
-- **An application you can change.** Inspect the source, run your own deployment, and extend the adapters.
+A Space brings together related work: Specialist Dots, conversations, sources, and results. Move between Spaces without losing the context of the work or which Dot is responsible for it.
 
-The architecture draws on [OpenMuse](https://github.com/CopilotKit/OpenMuse): durable tasks, a separate browser worker, visible activity, and rich results. OpenDots gives those patterns a focused research workflow and its own interface.
+Space membership and tool access must be enforced on the server. A sidebar selection is not an authorization boundary.
 
-## Features
+### Specialist Dots
 
-| Surface       | First-release scope                                                                              |
-| ------------- | ------------------------------------------------------------------------------------------------ |
-| Companion     | Original blue character, editable name, visible activity and pause state, reduced-motion support |
-| Conversation  | Submit research tasks and inspect their persisted progress and results                           |
-| Activity      | In-progress, scheduled, and completed work, with visible failures and retry controls             |
-| Research      | Read a supplied public URL and synthesize a result with source links                             |
-| Agent browser | Separate read-only browser service with page capture and bounded navigation                      |
-| Schedules     | Recurring checks that run while the application server is running                                |
-| Memory        | Inspect and manage saved context; control whether research uses it                               |
-| Controls      | Pause the agent, cancel tasks, and enforce supported research permissions on the server          |
-| Sample mode   | Clearly labeled fictional sources for trying the workflow without a model key                    |
+Give each Dot a name, role, instructions, and permitted tools. A researcher can investigate a topic; a writer can turn findings into a draft. Each Dot has a visible status, a durable conversation, and work you can inspect, pause, and resume.
 
-### Two explicit modes
+Specialization changes the agent's instructions and capabilities, not just its avatar. Background responsibilities need a running worker and explicit execution controls.
 
-**Sample mode** lets you explore task creation, activity, persistence, scheduling, and controls without paid services. Its research content is fictional and labeled as such.
+### Dottie-style chat
 
-**Live mode** uses the separate browser service and a configured OpenAI-compatible model endpoint. The initial live workflow requires a public URL; general web search is not included. Provider and browser failures appear as failed tasks, not sample results.
+The conversation is the main workspace:
 
-## Get started
+- A companion avatar and status above the conversation.
+- User messages in colored bubbles, with readable assistant replies and work updates.
+- Contextual messages that link back to the page or artifact they came from.
+- Text and call controls in the same conversation.
+- Call receipts in the timeline, including duration and outcome.
+- A nearby computer or result panel for inspecting the work.
 
-Setup instructions will be finalized after the initial implementation passes its acceptance checks. The planned development environment is **Node.js 24**, **npm**, and a modern browser. Sample mode will not require a model key or Docker.
+**Text** runs through CopilotKit and persists in Intelligence Threads. Returning to the app should reopen the same conversation, including its tool activity.
 
-The live browser service will have a Docker Compose configuration. Live model usage is billed by your configured provider. Recurring work requires the application server to remain running; closing its browser tab is supported, shutting down the server is not continuous execution.
+**Call — RTS + Compute** pairs realtime speech with a separate compute agent. Speech keeps the conversation responsive while the compute agent performs longer work. The call and its resulting work belong to the same conversation. The exact voice service integration is being validated; a microphone icon alone does not constitute a working call.
 
-## How it works
+### Slack through Channels SDK
+
+Talk to a Dot from Slack using **`@copilotkit/channels`** and a managed CopilotKit Intelligence connection. The Channels SDK process runs the agent and its tools; Intelligence handles the provider connection and message delivery.
+
+Slack identity must map to an authorized application identity and Space. A Slack conversation has its own stable thread; sharing it with a web conversation requires an explicit, authorized association. Display names or matching email addresses are not sufficient account linking.
+
+## Required foundation
+
+These are product requirements, not optional enhancements:
+
+| Foundation                           | Responsibility                                               |
+| ------------------------------------ | ------------------------------------------------------------ |
+| **CopilotKit Intelligence**          | Durable agent infrastructure and managed channel connections |
+| **CopilotKit Threads**               | Persisted conversations, messages, and agent activity        |
+| **CopilotKit Channels SDK**          | Slack message handling and agent replies                     |
+| **CopilotKit React SDK and runtime** | Web conversation UI, agent execution, and streaming          |
+| **RTS + Compute**                    | Realtime calls connected to a separate compute agent         |
+
+The application must report missing configuration explicitly. It must not silently substitute local chat storage or an unrelated model endpoint for Intelligence. Test fixtures may simulate dependencies; they are not a standalone product mode.
+
+OpenDots application code is MIT licensed. CopilotKit Intelligence is required infrastructure: use a configured hosted project or a supported self-hosted deployment. Running OpenDots yourself does not remove that requirement. Model, speech, and hosted-service usage may incur separate costs.
+
+## Architecture
 
 ```mermaid
-flowchart LR
-  UI[React web app] --> API[Node API]
-  API --> DB[(SQLite)]
-  Worker[Persistent task worker] --> DB
-  Worker --> Policy[Execution-time controls]
-  Policy --> Browser[Separate browser service]
-  Policy --> Model[Configured model provider]
-  Worker --> Results[Results and task events]
-  Results --> DB
+flowchart TB
+  Web["Web app: Spaces, Dots, Dottie chat"] --> Runtime[CopilotKit runtime]
+  Slack[Slack] <--> Managed[Managed Intelligence connection]
+  Managed <--> Channels[Channels SDK process]
+  Channels --> Agents[Specialist compute agents]
+  Runtime --> Agents
+  Runtime <--> Intelligence["CopilotKit Intelligence / Threads"]
+  Channels <--> Intelligence
+  Web <--> Speech[Realtime speech session]
+  Speech --> Bridge[Authorized compute bridge]
+  Bridge --> Agents
+  Agents --> Controls[Tool permissions and execution controls]
+  Controls --> Computer[Isolated browser / compute workspace]
+  Agents --> Jobs[Durable background work]
+  Runtime --> Metadata[(Spaces, Dot configuration, work metadata)]
 ```
 
-The database stores task state, schedules, messages, and settings. The worker claims due work, records progress, and persists results. The UI reads that state, so a page refresh does not restart the work. Browser access and model credentials stay behind the server boundary.
+Intelligence owns conversation history. The application stores Space and Dot configuration and background-work metadata. A job queue is not a replacement for Threads. Text, Slack, and speech must reach the same permission checks before an agent acts.
 
-OpenDots is initially a **single-owner application**. Local development binds to loopback. Public deployments require authentication, HTTPS, and an isolated browser service. See [Security](SECURITY.md) for the deployment boundary and reporting process.
+OpenMuse informs the persistent agent and visible-work experience. OpenBot informs agent-computer isolation and execution controls. Their application-specific channel concepts are distinct from the CopilotKit Channels SDK required here.
 
-## Roadmap
+## Development status
 
-The first milestone is a verified research workflow with durable scheduling and an inspectable browser. Further milestones are:
+A local research prototype has been built with persistent tasks, scheduling, memory controls, a separate read-only browser, and a responsive companion UI. It is being migrated to the required architecture before an application release.
 
-- Search-provider integrations for research without a supplied URL.
-- Slack and other messaging channels.
-- Connected-app adapters with explicit permission scopes.
-- File attachments and additional artifact viewers.
-- Voice and optional desktop integration.
-- Additional model-provider adapters and deployment options.
+| Capability                                      | Status                                                  |
+| ----------------------------------------------- | ------------------------------------------------------- |
+| Product scope and architecture                  | Defined in this README                                  |
+| Persistent research tasks and browser isolation | Implemented in the local prototype; integration pending |
+| Required Intelligence runtime and Threads       | Integration in progress                                 |
+| Spaces and Specialist Dots                      | Planned implementation                                  |
+| Dottie-style text conversation                  | Reference supplied; implementation pending              |
+| Slack through Channels SDK                      | Integration pending                                     |
+| Calls with RTS + Compute                        | Service contract and integration pending                |
+| End-to-end connected-service verification       | Pending configured services                             |
 
-These are planned capabilities, not working integrations in the first release. OpenDots does not currently offer local-computer control, arbitrary shell execution, payments, or autonomous outbound messaging.
+This initial repository milestone is documentation. Application source, reproducible setup commands, and verified dependency versions will follow with the implementation. There is no production-ready deployment or hosted demo to sign up for yet.
+
+### Implementation sequence
+
+1. Require Intelligence and wire durable Threads into the web runtime.
+2. Add persisted Spaces, Specialist Dot configuration, and server-side access checks.
+3. Implement the Dottie conversation layout, text streaming, and contextual work panels.
+4. Connect Slack through Channels SDK with explicit identity and Space mapping.
+5. Add realtime calls, compute delegation, cancellation, and call receipts.
+6. Verify background work, service failures, reconnects, and deployment setup.
 
 ## Contributing
 
-Issues and pull requests are welcome. Start with [Contributing](CONTRIBUTING.md), explain the workflow you want to improve, and include a reproducible example for bugs. Report security issues through the process in [SECURITY.md](SECURITY.md).
+Start with [Contributing](CONTRIBUTING.md). Keep changes focused on the required stack and the workflows above. Distinguish a working integration from a UI fixture, and include setup and verification evidence for new services.
 
-## Acknowledgments
+Report security issues using [Security](SECURITY.md). Never include credentials or private conversation content in public issues.
 
-- [OpenAI Dots](https://help.openai.com/en/articles/20001530-getting-started-with-your-dot) provides the product inspiration.
-- [CopilotKit OpenMuse](https://github.com/CopilotKit/OpenMuse) provides the architectural reference.
+## References
 
-OpenDots has its own branding and character. References to other products describe inspiration and do not imply affiliation or endorsement.
+- [OpenAI: Getting started with your dot](https://help.openai.com/en/articles/20001530-getting-started-with-your-dot)
+- [CopilotKit Intelligence](https://docs.copilotkit.ai/intelligence/overview)
+- [CopilotKit Channels SDK](https://github.com/CopilotKit/channels-sdk)
+- [Channels `createChannel` reference](https://docs.copilotkit.ai/reference/channels/functions/createChannel)
+- [CopilotKit OpenMuse](https://github.com/CopilotKit/OpenMuse)
+- [CopilotKit OpenBot](https://github.com/CopilotKit/openbot)
 
 ## License
 

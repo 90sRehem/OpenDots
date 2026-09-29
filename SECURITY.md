@@ -1,15 +1,17 @@
 # Security
 
-OpenDots is an early single-owner application. It is not a multi-tenant hosting platform or a security-audited autonomous agent.
+OpenDots is under development. The local prototype is single-owner; Space membership, Slack identity mapping, and voice delegation require additional enforcement before connected multi-user use. It is not a security-audited autonomous agent.
 
 ## Intended boundary
 
 - Run local development on loopback.
 - Protect remote deployments with authentication and HTTPS.
 - Keep the browser service isolated from the application host and private networks. Do not expose its port publicly.
-- Keep model keys and browser credentials on the server. Never commit `.env` files or local databases.
+- Keep Intelligence, model, speech, and browser credentials on the server. Never commit `.env` files or local databases.
 - Treat page text, uploaded content, and model output as untrusted data, not authorization to change permissions.
-- The initial research workflow is read-only. Adding external writes requires a separate authorization and review design.
+- Authorize every Space, Dot, and thread operation on the server. Map Slack actors explicitly; never treat a display name or client-supplied user ID as proof of identity.
+- Voice sessions must use scoped, short-lived credentials and route compute actions through the same permissions as text and Slack.
+- The initial research prototype is read-only. Adding external writes requires a separate authorization and review design.
 
 Recurring work requires an available server. A sample run is not evidence that a live provider or deployment is safe or configured correctly. Review results before using them for important decisions.
 
