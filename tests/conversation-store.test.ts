@@ -92,6 +92,28 @@ describe('conversation admission', () => {
   });
 });
 
+describe('run terminal transitions', () => {
+  it('refuses to finish an already-terminal run and does not append a duplicate event', () => {
+    const { store } = fixture();
+    const { run } = store.admitTurn({
+      threadId: 'thread-1',
+      dotId: 'dot-1',
+      ownerId: 'owner-1',
+      role: 'user',
+      content: { text: 'hello' },
+    });
+    const finished = store.finishRun(run.id, 'completed');
+    expect(() => store.finishRun(run.id, 'failed', 'too late')).toThrow();
+    expect(store.run(run.id)?.status).toBe('completed');
+    expect(store.run(run.id)?.finishedAt).toBe(finished.finishedAt);
+    expect(store.run(run.id)?.error).toBeNull();
+    const eventTypes = store
+      .events(run.id)
+      .map((event) => (event.payload as { type: string }).type);
+    expect(eventTypes).toEqual(['RUN_STARTED', 'RUN_FINISHED']);
+  });
+});
+
 describe('restart durability', () => {
   it('reads a thread back in ordinal order with no message loss after closing and reopening the handle', () => {
     const { store, path } = fixture(true);

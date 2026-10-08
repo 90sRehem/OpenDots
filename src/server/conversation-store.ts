@@ -99,9 +99,7 @@ export class ConversationStore {
       CREATE TABLE IF NOT EXISTS ag_ui_events(id INTEGER PRIMARY KEY AUTOINCREMENT, threadId TEXT NOT NULL, runId TEXT NOT NULL, seq INTEGER NOT NULL, payload TEXT NOT NULL, createdAt INTEGER NOT NULL, UNIQUE(runId, seq));
       CREATE TABLE IF NOT EXISTS connector_inbound(id INTEGER PRIMARY KEY AUTOINCREMENT, platform TEXT NOT NULL, updateId TEXT NOT NULL, offset INTEGER NOT NULL, createdAt INTEGER NOT NULL, UNIQUE(platform, updateId));
       CREATE TABLE IF NOT EXISTS connector_outbound(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, runId TEXT, status TEXT NOT NULL, payload TEXT NOT NULL, error TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
-      CREATE INDEX IF NOT EXISTS messages_thread ON messages(threadId, ordinal);
       CREATE INDEX IF NOT EXISTS runs_thread ON runs(threadId, startedAt);
-      CREATE INDEX IF NOT EXISTS ag_ui_events_run ON ag_ui_events(runId, seq);
       CREATE INDEX IF NOT EXISTS connector_inbound_offset ON connector_inbound(platform, offset);
       CREATE INDEX IF NOT EXISTS connector_outbound_status ON connector_outbound(threadId, status);`);
     // Additive forward compatibility: new columns arrive via ALTER TABLE ADD
@@ -260,14 +258,22 @@ export class ConversationStore {
       .prepare('SELECT * FROM runs WHERE threadId=? ORDER BY startedAt')
       .all(threadId) as unknown as ConversationRun[];
   }
-  finishRun(id: string, status: RunStatus, error: string | null = null): ConversationRun {
+  finishRun(
+    id: string,
+    status: Exclude<RunStatus, 'running'>,
+    error: string | null = null,
+  ): ConversationRun {
     return this.transaction(() => {
       const now = Date.now();
-      this.db
-        .prepare('UPDATE runs SET status=?, finishedAt=?, error=? WHERE id=?')
+      const result = this.db
+        .prepare("UPDATE runs SET status=?, finishedAt=?, error=? WHERE id=? AND status='running'")
         .run(status, now, error, id);
-      const run = this.run(id);
-      if (!run) throw new Error('Run not found.');
+      if (Number(result.changes) === 0) {
+        const existing = this.run(id);
+        if (!existing) throw new Error('Run not found.');
+        throw new Error(`Run ${id} cannot be finished from status '${existing.status}'.`);
+      }
+      const run = this.run(id)!;
       this.insertEvent(run.threadId, run.id, {
         type: status === 'completed' ? 'RUN_FINISHED' : 'RUN_ERROR',
         error,
