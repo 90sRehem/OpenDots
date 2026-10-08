@@ -744,4 +744,50 @@ describe('stop', () => {
     const runner = new ConversationRunner(store, 'owner-1');
     expect(await runner.stop({ threadId: 'thread-idle' })).toBe(false);
   });
+
+  it('stops only the run matching the caller-supplied AG-UI runId', async () => {
+    const { store } = fixtureStore();
+    const runner = new ConversationRunner(store, 'owner-1');
+    const agent = new ControlledAgent('dot-1');
+    runner
+      .run({
+        threadId: 'thread-9',
+        agent,
+        input: buildInput('thread-9', 'run-nine', [userMessage('u1', 'hi')]),
+      })
+      .subscribe();
+    await agent.started;
+
+    expect(
+      await runner.stop({ threadId: 'thread-9', runId: 'run-other' }),
+    ).toBe(false);
+    expect(agent.aborted).toBe(false);
+
+    expect(await runner.stop({ threadId: 'thread-9', runId: 'run-nine' })).toBe(
+      true,
+    );
+    expect(agent.aborted).toBe(true);
+    await waitUntil(() => store.runs('thread-9')[0]?.status === 'interrupted');
+  });
+
+  it('publishes a terminal RUN_ERROR to a subscriber when a run is aborted', async () => {
+    const { store } = fixtureStore();
+    const runner = new ConversationRunner(store, 'owner-1');
+    const agent = new ControlledAgent('dot-1');
+    const { events, done } = collect(
+      runner.run({
+        threadId: 'thread-10',
+        agent,
+        input: buildInput('thread-10', 'run-ten', [userMessage('u1', 'hi')]),
+      }),
+    );
+    await agent.started;
+    await runner.stop({ threadId: 'thread-10' });
+    await done;
+
+    expect(events.at(-1)).toEqual(
+      expect.objectContaining({ type: EventType.RUN_ERROR }),
+    );
+    expect(store.runs('thread-10')[0].status).toBe('interrupted');
+  });
 });

@@ -17,6 +17,7 @@ import {
   ConversationStore,
   type ConversationRun,
   type MessageRole,
+  type RunStatus,
 } from './conversation-store.js';
 
 const RESTART_INTERRUPT_REASON =
@@ -26,6 +27,7 @@ const STOP_INTERRUPT_REASON =
 
 interface ActiveRun {
   run: ConversationRun;
+  runId: string;
   agent: AbstractAgent;
   liveSubject: ReplaySubject<BaseEvent>;
   stopRequested: boolean;
@@ -149,7 +151,7 @@ export class ConversationRunner extends AgentRunner {
     this.reconcileThread(request.threadId);
     const active = this.active.get(request.threadId);
     if (!active) return false;
-    if (request.runId !== undefined && active.run.id !== request.runId)
+    if (request.runId !== undefined && active.runId !== request.runId)
       return false;
     active.stopRequested = true;
     try {
@@ -285,27 +287,28 @@ export class ConversationRunner extends AgentRunner {
       return;
     }
     const run = admittedRun!;
-    const canonical = this.canonicalMessages(threadId);
     const agent = request.agent;
-    // `RunAgentParameters` (the parameter `runAgent()` accepts) carries no
-    // `messages`/`state`/`threadId` fields — only the instance fields do —
-    // so this is the one and only place that controls what the agent
-    // actually executes with. Whatever the SDK set on this clone from the
-    // client's raw request body before handing it to this runner is
-    // overwritten here with the canonical, store-backed history.
-    agent.threadId = threadId;
-    agent.setMessages(canonical);
-    agent.setState(request.input.state);
     const active: ActiveRun = {
       run,
+      runId: request.input.runId,
       agent,
       liveSubject: subject,
       stopRequested: false,
     };
-    this.active.set(threadId, active);
     let sawErrorEvent = false;
     let errorMessage: string | undefined;
+    let sawTerminalEvent = false;
     try {
+      // `RunAgentParameters` (the parameter `runAgent()` accepts) carries no
+      // `messages`/`state`/`threadId` fields — only the instance fields do —
+      // so this is the one and only place that controls what the agent
+      // actually executes with. Whatever the SDK set on this clone from the
+      // client's raw request body before handing it to this runner is
+      // overwritten here with the canonical, store-backed history.
+      agent.threadId = threadId;
+      agent.setMessages(this.canonicalMessages(threadId));
+      agent.setState(request.input.state);
+      this.active.set(threadId, active);
       const result = await agent.runAgent(
         {
           runId: request.input.runId,
@@ -331,6 +334,11 @@ export class ConversationRunner extends AgentRunner {
               event.type === EventType.RUN_STARTED ||
               event.type === EventType.RUN_FINISHED ||
               event.type === EventType.RUN_ERROR;
+            if (
+              event.type === EventType.RUN_FINISHED ||
+              event.type === EventType.RUN_ERROR
+            )
+              sawTerminalEvent = true;
             if (event.type === EventType.RUN_ERROR) {
               sawErrorEvent = true;
               errorMessage =
@@ -360,28 +368,56 @@ export class ConversationRunner extends AgentRunner {
           toolCallId: message.role === 'tool' ? message.toolCallId : null,
         });
       }
-      this.store.finishRun(
-        run.id,
-        active.stopRequested
-          ? 'interrupted'
-          : sawErrorEvent
-            ? 'failed'
-            : 'completed',
-        active.stopRequested ? STOP_INTERRUPT_REASON : (errorMessage ?? null),
-      );
+      const status = active.stopRequested
+        ? 'interrupted'
+        : sawErrorEvent
+          ? 'failed'
+          : 'completed';
+      const reason = active.stopRequested
+        ? STOP_INTERRUPT_REASON
+        : (errorMessage ?? null);
+      this.store.finishRun(run.id, status, reason);
+      if (!sawTerminalEvent)
+        subject.next(
+          this.terminalEvent(threadId, request.input.runId, status, reason),
+        );
     } catch (error) {
-      this.store.finishRun(
-        run.id,
-        active.stopRequested ? 'interrupted' : 'failed',
-        active.stopRequested
-          ? STOP_INTERRUPT_REASON
-          : error instanceof Error
-            ? error.message
-            : String(error),
-      );
+      const status = active.stopRequested ? 'interrupted' : 'failed';
+      const reason = active.stopRequested
+        ? STOP_INTERRUPT_REASON
+        : error instanceof Error
+          ? error.message
+          : String(error);
+      this.store.finishRun(run.id, status, reason);
+      if (!sawTerminalEvent)
+        subject.next(
+          this.terminalEvent(threadId, request.input.runId, status, reason),
+        );
     } finally {
       this.active.delete(threadId);
       subject.complete();
     }
+  }
+
+  /**
+   * The terminal AG-UI event for a finalized run. The agent's own observable
+   * is the primary source of `RUN_FINISHED`/`RUN_ERROR`, but a rejection
+   * (abort, timeout, provider failure) or an agent that simply ends its stream
+   * never emits one; the caller must still see the run terminate explicitly
+   * rather than as a bare stream close.
+   */
+  private terminalEvent(
+    threadId: string,
+    runId: string,
+    status: Exclude<RunStatus, 'running'>,
+    error: string | null,
+  ): BaseEvent {
+    if (status === 'completed')
+      return { type: EventType.RUN_FINISHED, threadId, runId } as BaseEvent;
+    return {
+      type: EventType.RUN_ERROR,
+      message: error ?? 'Run failed.',
+      ...(status === 'interrupted' ? { code: 'STOPPED' } : {}),
+    } as BaseEvent;
   }
 }
