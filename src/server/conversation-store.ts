@@ -62,7 +62,10 @@ function isUniqueViolation(error: unknown): boolean {
   );
 }
 
-type MessageRow = Omit<ConversationMessage, 'content' | 'toolResult' | 'metadata'> & {
+type MessageRow = Omit<
+  ConversationMessage,
+  'content' | 'toolResult' | 'metadata'
+> & {
   content: string;
   toolResult: string | null;
   metadata: string | null;
@@ -142,7 +145,9 @@ export class ConversationStore {
     metadata?: unknown;
   }): ConversationMessage {
     const next = this.db
-      .prepare('SELECT COALESCE(MAX(ordinal), -1) + 1 AS ordinal FROM messages WHERE threadId=?')
+      .prepare(
+        'SELECT COALESCE(MAX(ordinal), -1) + 1 AS ordinal FROM messages WHERE threadId=?',
+      )
       .get(params.threadId) as { ordinal: number };
     const message: ConversationMessage = {
       id: randomUUID(),
@@ -190,13 +195,21 @@ export class ConversationStore {
       .run(run.id, run.threadId, run.startedAt);
     return run;
   }
-  private insertEvent(threadId: string, runId: string, payload: unknown): AgUiEvent {
+  private insertEvent(
+    threadId: string,
+    runId: string,
+    payload: unknown,
+  ): AgUiEvent {
     const next = this.db
-      .prepare('SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM ag_ui_events WHERE runId=?')
+      .prepare(
+        'SELECT COALESCE(MAX(seq), -1) + 1 AS seq FROM ag_ui_events WHERE runId=?',
+      )
       .get(runId) as { seq: number };
     const createdAt = Date.now();
     const result = this.db
-      .prepare('INSERT INTO ag_ui_events (threadId, runId, seq, payload, createdAt) VALUES (?, ?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO ag_ui_events (threadId, runId, seq, payload, createdAt) VALUES (?, ?, ?, ?, ?)',
+      )
       .run(threadId, runId, next.seq, JSON.stringify(payload), createdAt);
     return {
       id: Number(result.lastInsertRowid),
@@ -249,9 +262,9 @@ export class ConversationStore {
     ).map(toMessage);
   }
   run(id: string): ConversationRun | undefined {
-    return this.db.prepare('SELECT * FROM runs WHERE id=?').get(id) as unknown as
-      | ConversationRun
-      | undefined;
+    return this.db
+      .prepare('SELECT * FROM runs WHERE id=?')
+      .get(id) as unknown as ConversationRun | undefined;
   }
   runs(threadId: string): ConversationRun[] {
     return this.db
@@ -266,12 +279,16 @@ export class ConversationStore {
     return this.transaction(() => {
       const now = Date.now();
       const result = this.db
-        .prepare("UPDATE runs SET status=?, finishedAt=?, error=? WHERE id=? AND status='running'")
+        .prepare(
+          "UPDATE runs SET status=?, finishedAt=?, error=? WHERE id=? AND status='running'",
+        )
         .run(status, now, error, id);
       if (Number(result.changes) === 0) {
         const existing = this.run(id);
         if (!existing) throw new Error('Run not found.');
-        throw new Error(`Run ${id} cannot be finished from status '${existing.status}'.`);
+        throw new Error(
+          `Run ${id} cannot be finished from status '${existing.status}'.`,
+        );
       }
       const run = this.run(id)!;
       this.insertEvent(run.threadId, run.id, {
@@ -296,7 +313,9 @@ export class ConversationStore {
   admitInbound(platform: string, updateId: string, offset: number): boolean {
     try {
       this.db
-        .prepare('INSERT INTO connector_inbound (platform, updateId, offset, createdAt) VALUES (?, ?, ?, ?)')
+        .prepare(
+          'INSERT INTO connector_inbound (platform, updateId, offset, createdAt) VALUES (?, ?, ?, ?)',
+        )
         .run(platform, updateId, offset, Date.now());
       return true;
     } catch (error) {
@@ -306,11 +325,17 @@ export class ConversationStore {
   }
   highWaterOffset(platform: string): number | null {
     const row = this.db
-      .prepare('SELECT MAX(offset) AS offset FROM connector_inbound WHERE platform=?')
+      .prepare(
+        'SELECT MAX(offset) AS offset FROM connector_inbound WHERE platform=?',
+      )
       .get(platform) as { offset: number | null };
     return row.offset;
   }
-  queueOutbound(threadId: string, runId: string | null, payload: unknown): ConnectorOutbound {
+  queueOutbound(
+    threadId: string,
+    runId: string | null,
+    payload: unknown,
+  ): ConnectorOutbound {
     const now = Date.now();
     const outbound: ConnectorOutbound = {
       id: randomUUID(),
@@ -331,9 +356,9 @@ export class ConversationStore {
     return outbound;
   }
   outbound(id: string): ConnectorOutbound | undefined {
-    const row = this.db.prepare('SELECT * FROM connector_outbound WHERE id=?').get(id) as
-      | OutboundRow
-      | undefined;
+    const row = this.db
+      .prepare('SELECT * FROM connector_outbound WHERE id=?')
+      .get(id) as OutboundRow | undefined;
     return row ? toOutbound(row) : undefined;
   }
   pendingOutbound(threadId?: string): ConnectorOutbound[] {
@@ -345,13 +370,20 @@ export class ConversationStore {
         .all(...(threadId ? [threadId] : [])) as unknown as OutboundRow[]
     ).map(toOutbound);
   }
-  markOutbound(id: string, status: OutboundStatus, error: string | null = null): ConnectorOutbound {
+  markOutbound(
+    id: string,
+    status: OutboundStatus,
+    error: string | null = null,
+  ): ConnectorOutbound {
     return this.transaction(() => {
       const current = this.outbound(id);
       if (!current) throw new Error('Outbound delivery not found.');
-      const retryCount = status === 'failed' ? current.retryCount + 1 : current.retryCount;
+      const retryCount =
+        status === 'failed' ? current.retryCount + 1 : current.retryCount;
       this.db
-        .prepare('UPDATE connector_outbound SET status=?, error=?, retryCount=?, updatedAt=? WHERE id=?')
+        .prepare(
+          'UPDATE connector_outbound SET status=?, error=?, retryCount=?, updatedAt=? WHERE id=?',
+        )
         .run(status, error, retryCount, Date.now(), id);
       return this.outbound(id)!;
     });

@@ -38,7 +38,9 @@ describe('conversation admission', () => {
     expect(message.ordinal).toBe(0);
     expect(store.run(run.id)?.status).toBe('running');
     expect(store.events(run.id)).toHaveLength(1);
-    expect(store.events(run.id)[0].payload).toMatchObject({ type: 'RUN_STARTED' });
+    expect(store.events(run.id)[0].payload).toMatchObject({
+      type: 'RUN_STARTED',
+    });
   });
   it('assigns increasing ordinals per thread as messages are appended', () => {
     const { store } = fixture();
@@ -71,7 +73,11 @@ describe('conversation admission', () => {
         content: unknown;
       }) => unknown;
       insertRun: (threadId: string) => { id: string };
-      insertEvent: (threadId: string, runId: string, payload: unknown) => unknown;
+      insertEvent: (
+        threadId: string,
+        runId: string,
+        payload: unknown,
+      ) => unknown;
     };
     expect(() =>
       privateStore.transaction(() => {
