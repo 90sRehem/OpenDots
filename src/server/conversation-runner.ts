@@ -90,9 +90,19 @@ export class ConversationRunner extends AgentRunner {
     // request-scoped execution, this run must keep going even if the
     // originating transport disconnects (a late `connect()` can still see
     // it finish), so nothing here is wired to the subject's subscribers.
+    // The shared boundary also guarantees `subject` terminates even when
+    // `executeRun` rejects before reaching its own try/finally (a store read
+    // or write in its prologue), so a caller never gets a hung stream.
     void this.enqueue(request.threadId, () =>
       this.executeRun(request, subject),
-    );
+    ).catch((error) => {
+      subject.next({
+        type: EventType.RUN_ERROR,
+        message: error instanceof Error ? error.message : String(error),
+        code: 'RUN_FAILED',
+      } as BaseEvent);
+      subject.complete();
+    });
     return subject.asObservable();
   }
 

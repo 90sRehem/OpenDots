@@ -791,3 +791,28 @@ describe('stop', () => {
     expect(store.runs('thread-10')[0].status).toBe('interrupted');
   });
 });
+
+describe('stream termination', () => {
+  it('emits a terminal RUN_ERROR when a store read rejects before admission', async () => {
+    const store = {
+      runs: () => [],
+      messages: () => {
+        throw new Error('store unavailable');
+      },
+    } as unknown as ConversationStore;
+    const runner = new ConversationRunner(store, 'owner-1');
+    const agent = new EchoAgent('dot-1', 'unused');
+    const { events, done } = collect(
+      runner.run({
+        threadId: 'thread-boom',
+        agent,
+        input: buildInput('thread-boom', 'run-boom', [userMessage('u1', 'hi')]),
+      }),
+    );
+    await done;
+
+    expect(events).toEqual([
+      expect.objectContaining({ type: EventType.RUN_ERROR }),
+    ]);
+  });
+});
