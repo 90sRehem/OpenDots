@@ -65,6 +65,10 @@ export class Platform {
       };
     });
     const runner = new ConversationRunner(conversationStore, workspace.ownerId);
+    // Built without Intelligence on purpose. Server-side turns
+    // (`Platform.turn` -> `runThreadTurn`) still require an Intelligence-mode
+    // runtime, so scheduled tasks via the legacy Runner and voice
+    // compute/receipt stay broken until T07/T08 migrate them off Intelligence.
     const runtime = new CopilotRuntime({
       runner,
       telemetryId: this.setupTelemetry.identity,
