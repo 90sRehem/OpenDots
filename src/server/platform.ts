@@ -26,6 +26,9 @@ export class Platform {
   readonly computers: ComputerService;
   readonly connections: ConnectionService;
   readonly handler: CopilotHonoApp;
+  private readonly runner: ConversationRunner;
+  private readonly turns = new Set<Promise<string>>();
+  private readonly shutdown = new AbortController();
   constructor(
     readonly store: Store,
     readonly workspace: WorkspaceStore,
@@ -64,13 +67,11 @@ export class Platform {
         }),
       };
     });
-    const runner = new ConversationRunner(conversationStore, workspace.ownerId);
-    // Built without Intelligence on purpose. Server-side turns
-    // (`Platform.turn` -> `runThreadTurn`) still require an Intelligence-mode
-    // runtime, so scheduled tasks via the legacy Runner and voice
-    // compute/receipt stay broken until T07/T08 migrate them off Intelligence.
+    // Web chat, scheduled tasks, and voice compute all share this runner, so
+    // they share one canonical transcript per thread.
+    this.runner = new ConversationRunner(conversationStore, workspace.ownerId);
     const runtime = new CopilotRuntime({
-      runner,
+      runner: this.runner,
       telemetryId: this.setupTelemetry.identity,
       telemetryProperties: this.setupTelemetry.metadata,
       identifyUser: async () => ({
@@ -79,19 +80,7 @@ export class Platform {
       }),
       agents: async () =>
         Object.fromEntries(
-          workspace
-            .dots()
-            .map((dot) => [
-              dot.id,
-              new DotAgent(
-                store,
-                workspace,
-                config,
-                dot.id,
-                false,
-                this.setupTelemetry,
-              ),
-            ]),
+          workspace.dots().map((dot) => [dot.id, this.dotAgent(dot.id)]),
         ),
     });
     this.handler = createCopilotHonoHandler({
@@ -99,6 +88,32 @@ export class Platform {
       basePath: '/api/copilotkit',
       cors: { origin: [] },
     });
+    // Work this database still shows as open was left by a process that has
+    // exited. Mark it interrupted now; it is never resumed. `isRunning`
+    // reconciles its thread before answering, and does so synchronously.
+    for (const thread of workspace.conversations())
+      void this.runner.isRunning({ threadId: thread.id });
+    for (const call of workspace.calls())
+      if (
+        !call.endedAt &&
+        (call.status === 'connecting' || call.status === 'active')
+      )
+        workspace.setCall(
+          call.id,
+          'failed',
+          call.transcript,
+          'Call interrupted by a server restart. Start a new call to continue.',
+        );
+  }
+  private dotAgent(dotId: string) {
+    return new DotAgent(
+      this.store,
+      this.workspace,
+      this.config,
+      dotId,
+      false,
+      this.setupTelemetry,
+    );
   }
   setup() {
     const status = setupStatus(
@@ -127,6 +142,10 @@ export class Platform {
     this.setupTelemetry.start();
   }
   async stop() {
+    // Each in-flight turn ends through `runner.stop`, so it is recorded
+    // `interrupted` before the database closes. Nothing resumes it next start.
+    this.shutdown.abort(new Error('Server is stopping.'));
+    await Promise.allSettled([...this.turns]);
     await this.setupTelemetry.stop();
     this.conversationStore.close();
   }
@@ -186,16 +205,19 @@ export class Platform {
   ): Promise<string> {
     this.requireReady();
     const thread = this.workspace.requireThread(threadId);
-    return runThreadTurn(
-      this.config.runtimeUrl,
-      this.config.ownerToken
-        ? { Authorization: `Bearer ${this.config.ownerToken}` }
-        : {},
-      thread.dotId,
+    const turn = runThreadTurn(
+      this.runner,
+      this.dotAgent(thread.dotId),
       threadId,
       prompt,
-      signal,
+      AbortSignal.any([signal, this.shutdown.signal]),
       metadata,
     );
+    this.turns.add(turn);
+    try {
+      return await turn;
+    } finally {
+      this.turns.delete(turn);
+    }
   }
 }

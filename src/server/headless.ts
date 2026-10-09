@@ -1,9 +1,18 @@
-import { IntelligenceAgent } from '@copilotkit/core';
-import type { Message } from '@ag-ui/core';
+import {
+  AbstractAgent,
+  EventType,
+  type BaseEvent,
+  type Message,
+  type RunAgentInput,
+  type RunErrorEvent,
+  type TextMessageContentEvent,
+  type TextMessageStartEvent,
+} from '@ag-ui/client';
 import { randomUUID } from 'node:crypto';
-import { z } from 'zod';
+import { Observable, of } from 'rxjs';
 import { voiceReceiptMessagePrefix } from '../shared/voice-receipt.js';
 import { scheduledTaskMessagePrefix } from '../shared/scheduled-message.js';
+import type { ConversationRunner } from './conversation-runner.js';
 
 export function currentTurnText(messages: Message[], error?: Error): string {
   if (error) throw error;
@@ -15,70 +24,111 @@ export function currentTurnText(messages: Message[], error?: Error): string {
   return content;
 }
 
-const runtimeInfoSchema = z.object({
-  mode: z.literal('intelligence'),
-  intelligence: z.object({ wsUrl: z.url() }),
-  agents: z.record(z.string(), z.unknown()),
-});
+/**
+ * The agent the runner executes for one turn. The runner starts a turn only
+ * once its thread is free, so a turn can wait behind another run. If its
+ * caller gave up while it waited, it ends here without calling the model.
+ */
+class TurnAgent extends AbstractAgent {
+  constructor(
+    private readonly inner: AbstractAgent,
+    private readonly signal: AbortSignal,
+  ) {
+    super({ agentId: inner.agentId });
+  }
+  clone() {
+    return new TurnAgent(this.inner.clone(), this.signal);
+  }
+  abortRun() {
+    this.inner.abortRun();
+  }
+  run(input: RunAgentInput): Observable<BaseEvent> {
+    if (this.signal.aborted)
+      return of({
+        type: EventType.RUN_ERROR,
+        message: 'Turn was cancelled before it started; it was not run.',
+      } as BaseEvent);
+    return this.inner.run(input);
+  }
+}
 
+/**
+ * Runs one turn on the local durable runner and resolves to the Dot's reply.
+ * The turn's user message and every event are committed by the runner, so the
+ * reply appears in the same canonical thread history the web chat reads.
+ *
+ * Aborting `signal` stops an in-flight turn through `runner.stop`, which
+ * records it `interrupted`; the caller then sees the signal's reason.
+ */
 export async function runThreadTurn(
-  runtimeUrl: string,
-  headers: Record<string, string>,
-  dotId: string,
+  runner: Pick<ConversationRunner, 'run' | 'stop'>,
+  agent: AbstractAgent,
   threadId: string,
   prompt: string,
   signal: AbortSignal,
   metadata?: Record<string, unknown>,
 ): Promise<string> {
   signal.throwIfAborted();
-  const response = await fetch(`${runtimeUrl}/info`, { headers, signal });
-  if (!response.ok)
-    throw new Error(`Intelligence runtime returned HTTP ${response.status}.`);
-  const info = runtimeInfoSchema.parse(await response.json());
-  if (!Object.hasOwn(info.agents, dotId))
-    throw new Error('The selected Dot is unavailable in the runtime.');
-  // Core's runtime discovery is browser-only. Use the SDK's Node-compatible
-  // Intelligence agent for voice compute and scheduled server turns.
-  const agent = new IntelligenceAgent({
-    url: info.intelligence.wsUrl,
-    runtimeUrl,
-    agentId: dotId,
-    headers,
-    fetch: (input, init) =>
-      fetch(input, {
-        ...init,
-        signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal,
-      }),
-  });
-  agent.threadId = threadId;
-  let runError: Error | undefined;
-  const subscription = agent.subscribe({
-    onRunErrorEvent: ({ event }) => {
-      runError = new Error(event.message);
-    },
-  });
-  const stop = () => agent.abortRun();
+  const runId = randomUUID();
+  const idPrefix =
+    metadata?.opendotsSource === 'voice_receipt'
+      ? voiceReceiptMessagePrefix
+      : metadata?.opendotsSource === 'scheduled_task'
+        ? scheduledTaskMessagePrefix
+        : '';
+  const message: Message = {
+    id: `${idPrefix}${randomUUID()}`,
+    role: 'user',
+    content: prompt,
+    ...(metadata ? { metadata } : {}),
+  };
+  const stop = () => void runner.stop({ threadId, runId });
   signal.addEventListener('abort', stop, { once: true });
+  const replies: { id: string; text: string }[] = [];
+  let runError: Error | undefined;
   try {
-    signal.throwIfAborted();
-    const idPrefix =
-      metadata?.opendotsSource === 'voice_receipt'
-        ? voiceReceiptMessagePrefix
-        : metadata?.opendotsSource === 'scheduled_task'
-          ? scheduledTaskMessagePrefix
-          : '';
-    agent.addMessage({
-      id: `${idPrefix}${randomUUID()}`,
-      role: 'user',
-      content: prompt,
-      ...(metadata ? { metadata } : {}),
+    await new Promise<void>((resolve) => {
+      runner
+        .run({
+          threadId,
+          agent: new TurnAgent(agent, signal),
+          input: {
+            threadId,
+            runId,
+            state: undefined,
+            messages: [message],
+            tools: [],
+            context: [],
+            forwardedProps: {},
+          },
+        })
+        .subscribe({
+          next: (event) => {
+            if (event.type === EventType.TEXT_MESSAGE_START) {
+              const start = event as TextMessageStartEvent;
+              if (start.role === 'assistant')
+                replies.push({ id: start.messageId, text: '' });
+            } else if (event.type === EventType.TEXT_MESSAGE_CONTENT) {
+              const content = event as TextMessageContentEvent;
+              for (const reply of replies)
+                if (reply.id === content.messageId) reply.text += content.delta;
+            } else if (event.type === EventType.RUN_ERROR) {
+              runError = new Error((event as RunErrorEvent).message);
+            }
+          },
+          complete: resolve,
+        });
     });
-    const result = await agent.runAgent();
-    signal.throwIfAborted();
-    return currentTurnText(result.newMessages, runError);
   } finally {
     signal.removeEventListener('abort', stop);
-    subscription.unsubscribe();
-    await agent.detachActiveRun();
   }
+  signal.throwIfAborted();
+  return currentTurnText(
+    replies.map((reply) => ({
+      id: reply.id,
+      role: 'assistant',
+      content: reply.text,
+    })),
+    runError,
+  );
 }

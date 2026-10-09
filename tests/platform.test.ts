@@ -1,5 +1,4 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { ZodError } from 'zod';
 import { ConversationStore } from '../src/server/conversation-store.js';
 import { Platform } from '../src/server/platform.js';
 import { Store } from '../src/server/store.js';
@@ -108,35 +107,4 @@ it('backs page conversations and saved page text with the durable store', async 
   });
   const saved = await platform.pages.saveConversation(thread.id, 'Saved', null);
   expect(saved.content).toBe('## You\n\nPage question');
-});
-
-it('records that server turns reject the Intelligence-free runtime until T07/T08', async () => {
-  const { platform } = fixture({
-    runtimeUrl: 'http://runtime.invalid/api/copilotkit',
-  });
-  const info = await (
-    await platform.handle(new Request('http://localhost/api/copilotkit/info'))
-  ).json();
-  expect(info.mode).toBe('sse');
-  expect(info.intelligence).toBeUndefined();
-
-  vi.stubGlobal(
-    'fetch',
-    vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
-      const request =
-        input instanceof Request ? input : new Request(input, init);
-      return platform.handle(request);
-    }),
-  );
-
-  const dot = platform.workspace.dots()[0];
-  const thread = await platform.createConversation(dot.id, 'Server turn');
-  await expect(
-    platform.turn(
-      thread.id,
-      'Run the scheduled task',
-      new AbortController().signal,
-      { opendotsSource: 'scheduled_task' },
-    ),
-  ).rejects.toBeInstanceOf(ZodError);
 });
