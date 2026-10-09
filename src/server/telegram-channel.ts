@@ -1,5 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { AbstractAgent, EventType, type Message, type RunAgentInput } from '@ag-ui/client';
+import {
+  AbstractAgent,
+  EventType,
+  type Message,
+  type RunAgentInput,
+} from '@ag-ui/client';
 import { lastValueFrom, toArray } from 'rxjs';
 import { safeFailure } from './channel-errors.js';
 import { ConversationStore } from './conversation-store.js';
@@ -7,7 +12,8 @@ import { WorkspaceStore } from './workspace.js';
 
 const PLATFORM = 'telegram';
 const MAX_OUTBOUND_ATTEMPTS = 3;
-const INTERRUPTED_NOTICE = 'A previous run was interrupted. Please resend your message to continue.';
+const INTERRUPTED_NOTICE =
+  'A previous run was interrupted. Please resend your message to continue.';
 
 type TelegramUpdate = {
   update_id: number;
@@ -27,7 +33,11 @@ export function isEligibleTelegramUpdate(
   update: TelegramUpdate,
   ownerId: string,
   allowedIds: ReadonlySet<string>,
-): update is TelegramUpdate & { message: NonNullable<TelegramUpdate['message']> & { from: NonNullable<TelegramUpdate['message']>['from'] } } {
+): update is TelegramUpdate & {
+  message: NonNullable<TelegramUpdate['message']> & {
+    from: NonNullable<TelegramUpdate['message']>['from'];
+  };
+} {
   const message = update?.message;
   const sender = message?.from;
   return (
@@ -73,7 +83,8 @@ export class TelegramChannel {
         await this.pollOnce();
       } catch (error) {
         // Errors from fetch may contain the request URL, so report only a closed classification.
-        if (!this.#stopped) console.error(`Telegram polling failed: ${safeFailure(error)}`);
+        if (!this.#stopped)
+          console.error(`Telegram polling failed: ${safeFailure(error)}`);
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     }
@@ -84,7 +95,13 @@ export class TelegramChannel {
     const updates = await this.request<TelegramUpdate[]>('getUpdates', {
       ...(highWater === null ? {} : { offset: highWater + 1 }),
       timeout: 30,
-      allowed_updates: ['message', 'edited_message', 'channel_post', 'my_chat_member', 'callback_query'],
+      allowed_updates: [
+        'message',
+        'edited_message',
+        'channel_post',
+        'my_chat_member',
+        'callback_query',
+      ],
     });
     for (const update of updates) {
       if (this.isPaused() || this.#stopped) return;
@@ -94,20 +111,32 @@ export class TelegramChannel {
 
   private async handleUpdate(update: TelegramUpdate): Promise<void> {
     if (!isEligibleTelegramUpdate(update, this.ownerId, this.#allowedIds)) {
-      this.store.admitInbound(PLATFORM, String(update.update_id), update.update_id);
+      this.store.admitInbound(
+        PLATFORM,
+        String(update.update_id),
+        update.update_id,
+      );
       return;
     }
 
     const message = update.message;
     const text = message.text ?? message.caption;
     if (typeof text !== 'string' || !text.trim()) {
-      this.store.admitInbound(PLATFORM, String(update.update_id), update.update_id);
+      this.store.admitInbound(
+        PLATFORM,
+        String(update.update_id),
+        update.update_id,
+      );
       return;
     }
 
     const dot = this.workspace.dots()[0];
     if (!dot) {
-      this.store.admitInbound(PLATFORM, String(update.update_id), update.update_id);
+      this.store.admitInbound(
+        PLATFORM,
+        String(update.update_id),
+        update.update_id,
+      );
       return;
     }
     const threadId = `telegram-${message.chat.id}`;
@@ -139,7 +168,9 @@ export class TelegramChannel {
     if (!admitted) return;
 
     const agent = this.agentFactory(dot.id);
-    const history = this.store.messages(threadId).map((entry) => entry.content as Message);
+    const history = this.store
+      .messages(threadId)
+      .map((entry) => entry.content as Message);
     const input: RunAgentInput = {
       threadId,
       runId: randomUUID(),
@@ -154,7 +185,11 @@ export class TelegramChannel {
     try {
       const events = await lastValueFrom(agent.run(input).pipe(toArray()));
       for (const event of events) {
-        if (event.type === EventType.TEXT_MESSAGE_CONTENT && 'delta' in event && typeof event.delta === 'string')
+        if (
+          event.type === EventType.TEXT_MESSAGE_CONTENT &&
+          'delta' in event &&
+          typeof event.delta === 'string'
+        )
           reply += event.delta;
         if (event.type === EventType.RUN_ERROR) failed = true;
       }
@@ -168,7 +203,11 @@ export class TelegramChannel {
           metadata: { platform: PLATFORM },
         });
       }
-      this.store.finishRun(admitted.run.id, failed ? 'failed' : 'completed', failed ? 'Agent run failed.' : null);
+      this.store.finishRun(
+        admitted.run.id,
+        failed ? 'failed' : 'completed',
+        failed ? 'Agent run failed.' : null,
+      );
     } catch {
       this.store.finishRun(admitted.run.id, 'failed', 'Agent run failed.');
       return;
@@ -186,7 +225,11 @@ export class TelegramChannel {
     for (const thread of this.workspace.conversations()) {
       for (const run of this.store.runs(thread.id)) {
         if (run.status !== 'running') continue;
-        this.store.finishRun(run.id, 'interrupted', 'Run interrupted by process restart.');
+        this.store.finishRun(
+          run.id,
+          'interrupted',
+          'Run interrupted by process restart.',
+        );
         const outbound = this.store.queueOutbound(thread.id, run.id, {
           chat_id: Number(this.ownerId),
           text: INTERRUPTED_NOTICE,
@@ -194,12 +237,18 @@ export class TelegramChannel {
         await this.deliver(outbound.id);
       }
     }
-    for (const outbound of this.store.pendingOutbound()) await this.deliver(outbound.id);
+    for (const outbound of this.store.pendingOutbound())
+      await this.deliver(outbound.id);
   }
 
   private async deliver(id: string): Promise<void> {
     let outbound = this.store.outbound(id);
-    if (!outbound || outbound.status === 'delivered' || outbound.status === 'failed') return;
+    if (
+      !outbound ||
+      outbound.status === 'delivered' ||
+      outbound.status === 'failed'
+    )
+      return;
     while (outbound.retryCount < MAX_OUTBOUND_ATTEMPTS) {
       this.store.markOutbound(id, 'attempting');
       try {
@@ -213,9 +262,14 @@ export class TelegramChannel {
     }
   }
 
-  private async request<T = unknown>(method: string, body?: unknown): Promise<T> {
+  private async request<T = unknown>(
+    method: string,
+    body?: unknown,
+  ): Promise<T> {
     try {
-      const url = new URL(`https://api.telegram.org/bot${this.#token}/${method}`);
+      const url = new URL(
+        `https://api.telegram.org/bot${this.#token}/${method}`,
+      );
       const isGet = method === 'getUpdates';
       if (isGet && body && typeof body === 'object')
         for (const [key, value] of Object.entries(body))
@@ -223,11 +277,17 @@ export class TelegramChannel {
       const response = await fetch(url, {
         method: isGet ? 'GET' : 'POST',
         ...(!isGet && body !== undefined
-          ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }
+          ? {
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            }
           : {}),
         ...(this.#controller ? { signal: this.#controller.signal } : {}),
       });
-      if (!response.ok) throw Object.assign(new Error('Telegram request failed.'), { status: response.status });
+      if (!response.ok)
+        throw Object.assign(new Error('Telegram request failed.'), {
+          status: response.status,
+        });
       const result = (await response.json()) as TelegramResult<T>;
       if (!result.ok) throw new Error('Telegram request failed.');
       return result.result;
