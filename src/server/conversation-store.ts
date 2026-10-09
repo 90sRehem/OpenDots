@@ -312,6 +312,37 @@ export class ConversationStore {
         .all(runId) as unknown as EventRow[]
     ).map(toEvent);
   }
+  admitInboundTurn(params: {
+    platform: string;
+    updateId: string;
+    offset: number;
+    threadId: string;
+    dotId: string;
+    ownerId: string;
+    role: MessageRole;
+    content: unknown;
+    metadata?: unknown;
+  }): { message: ConversationMessage; run: ConversationRun } | null {
+    return this.transaction(() => {
+      try {
+        this.db
+          .prepare(
+            'INSERT INTO connector_inbound (platform, updateId, offset, createdAt) VALUES (?, ?, ?, ?)',
+          )
+          .run(params.platform, params.updateId, params.offset, Date.now());
+      } catch (error) {
+        if (isUniqueViolation(error)) return null;
+        throw error;
+      }
+      const message = this.insertMessage(params);
+      const run = this.insertRun(params.threadId);
+      this.insertEvent(run.threadId, run.id, {
+        type: 'RUN_STARTED',
+        messageId: message.id,
+      });
+      return { message, run };
+    });
+  }
   // Durable dedup for redelivered platform updates: the (platform, updateId)
   // uniqueness constraint rejects the duplicate, not an application-level check.
   admitInbound(platform: string, updateId: string, offset: number): boolean {
