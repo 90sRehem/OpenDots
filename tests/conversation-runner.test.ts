@@ -812,6 +812,72 @@ describe('live join, drop, and reconnect through connect()', () => {
     const storeRunIds = store.runs('thread-multi-run').map((run) => run.id);
     expect(terminals.map((event) => event.runId)).not.toEqual(storeRunIds);
   });
+
+  it("replays an interrupted run's partial content before its own terminal, not after later runs", async () => {
+    const { store } = fixtureStore();
+    const runnerA = new ConversationRunner(store, 'owner-1');
+    const agent = new ControlledAgent('dot-1');
+    runnerA
+      .run({
+        threadId: 'thread-partial',
+        agent,
+        input: buildInput('thread-partial', 'run-crash', [
+          userMessage('u1', 'hi'),
+        ]),
+      })
+      .subscribe();
+    await agent.started;
+    agent.current!.next({
+      type: EventType.RUN_STARTED,
+      threadId: 'thread-partial',
+      runId: 'run-crash',
+    });
+    agent.current!.next({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: 'm1',
+      role: 'assistant',
+    });
+    agent.current!.next({
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      messageId: 'm1',
+      delta: 'partial',
+    });
+    await waitUntil(() => {
+      const run = store.runs('thread-partial')[0];
+      return !!run && store.events(run.id).length >= 4;
+    });
+
+    // A fresh process over the same store: the abandoned run is reconciled to
+    // `interrupted`, and a later run then completes normally.
+    const runnerB = new ConversationRunner(store, 'owner-1');
+    const before = store
+      .messages('thread-partial')
+      .map((m) => m.content as Message);
+    await collect(
+      runnerB.run({
+        threadId: 'thread-partial',
+        agent: new EchoAgent('dot-1', 'later answer'),
+        input: buildInput('thread-partial', 'run-later', [
+          ...before,
+          userMessage('u2', 'more'),
+        ]),
+      }),
+    ).done;
+
+    const events: BaseEvent[] = [];
+    runnerB
+      .connect({ threadId: 'thread-partial' })
+      .subscribe((event) => events.push(event));
+    await flush();
+
+    expect(events.map((e) => e.type)).toEqual([
+      EventType.MESSAGES_SNAPSHOT,
+      EventType.TEXT_MESSAGE_START,
+      EventType.TEXT_MESSAGE_CONTENT,
+      EventType.RUN_ERROR,
+      EventType.RUN_FINISHED,
+    ]);
+  });
 });
 
 // --- stop ----------------------------------------------------------------------

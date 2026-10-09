@@ -154,6 +154,7 @@ export class ConversationRunner extends AgentRunner {
       // durably, at admission) if present; falls back to the store's
       // internal `run.id` for a run that predates that marker existing.
       let runId: string = run.id;
+      const runEvents: BaseEvent[] = [];
       for (const event of this.store.events(run.id)) {
         const payload = event.payload as BaseEvent & Record<string, unknown>;
         if ((payload.type as string) === RUN_ID_MARKER) {
@@ -182,8 +183,9 @@ export class ConversationRunner extends AgentRunner {
             : undefined;
         if (messageId && emittedMessageIds.has(messageId)) continue;
         if (toolCallId && emittedToolCallIds.has(toolCallId)) continue;
-        historic.push(payload);
+        runEvents.push(payload);
       }
+      for (const event of compactEvents(runEvents)) historic.push(event);
       historic.push(
         this.terminalEvent(
           threadId,
@@ -198,7 +200,7 @@ export class ConversationRunner extends AgentRunner {
       type: EventType.MESSAGES_SNAPSHOT,
       messages: snapshot,
     } as BaseEvent);
-    for (const event of compactEvents(historic)) out.next(event);
+    for (const event of historic) out.next(event);
     if (!active) {
       out.complete();
       return out.asObservable();
