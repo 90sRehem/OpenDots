@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
+import { ConversationStore } from '../src/server/conversation-store.js';
 import { pageAccess } from '../src/server/page-tools.js';
 
 const resources: { store: Store; dir: string }[] = [];
@@ -149,6 +150,25 @@ describe('durable task lifecycle', () => {
       expect(store.claim(now + 180_002)?.id).toBe(task.id);
     } finally {
       workspace.close();
+    }
+  });
+  it('shares one database file with the conversation store without schema collisions', () => {
+    const { store, path } = fixture();
+    const conversations = new ConversationStore(path);
+    try {
+      const task = store.createTask('Share the database file');
+      const { run } = conversations.admitTurn({
+        threadId: 'thread-shared',
+        dotId: 'dot-1',
+        ownerId: 'owner-1',
+        role: 'user',
+        content: { text: 'hello' },
+      });
+      expect(store.task(task.id)?.prompt).toBe('Share the database file');
+      expect(conversations.run(run.id)?.threadId).toBe('thread-shared');
+      expect(conversations.runs('thread-shared')).toHaveLength(1);
+    } finally {
+      conversations.close();
     }
   });
 });
