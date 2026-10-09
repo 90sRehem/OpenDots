@@ -16,7 +16,7 @@ Keep both generated values in the server environment:
 
 | Variable                   | Purpose                                                                                    |
 | -------------------------- | ------------------------------------------------------------------------------------------ |
-| `CPK_INTELLIGENCE_API_KEY` | Server-only project key for persistent conversations.                                      |
+| `CPK_INTELLIGENCE_API_KEY` | Server-only project key for the selected Intelligence project.                             |
 | `CPK_TELEMETRY_ID`         | CLI-issued project binding that the telemetry sink can resolve to an Intelligence account. |
 
 Deploy the values for the selected project together. Do not generate your own

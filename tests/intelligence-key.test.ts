@@ -9,6 +9,7 @@ import {
 } from '../src/server/platform-config.js';
 import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
+import { ConversationStore } from '../src/server/conversation-store.js';
 
 const configured: PlatformConfig = {
   apiKey: 'fixture',
@@ -41,7 +42,7 @@ it('accepts the CLI project key and still accepts the template name', () => {
   expect(intelligenceApiKeyFromEnv({})).toBeUndefined();
 });
 
-it('reports either accepted name from the same label used by setup status and the copilotkit error', async () => {
+it('keeps Intelligence config compatibility but starts the local runtime without a key', async () => {
   const key = intelligenceApiKeyFromEnv({
     CPK_INTELLIGENCE_API_KEY: 'cpk-from-cli',
   });
@@ -57,19 +58,26 @@ it('reports either accepted name from the same label used by setup status and th
 
   const store = new Store(':memory:');
   const workspace = new WorkspaceStore(':memory:', 'owner');
+  const conversationStore = new ConversationStore(':memory:');
   try {
-    const platform = new Platform(store, workspace, configured);
+    const platform = new Platform(
+      store,
+      workspace,
+      configured,
+      conversationStore,
+    );
     const response = await platform.handle(
       new Request('http://127.0.0.1/api/copilotkit/info'),
     );
-    expect(response.status).toBe(503);
-    expect(await response.json()).toEqual({
-      error: `Setup required: ${INTELLIGENCE_KEY_MISSING_LABEL}.`,
-    });
-    expect(platform.setup().missing).toContain(INTELLIGENCE_KEY_MISSING_LABEL);
+    expect(response.status).toBe(200);
+    expect(platform.setup().missing).not.toContain(
+      INTELLIGENCE_KEY_MISSING_LABEL,
+    );
+    expect(platform.setup().missing).toEqual([]);
   } finally {
     store.close();
     workspace.close();
+    conversationStore.close();
   }
 });
 

@@ -98,11 +98,11 @@ export class ConversationStore {
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;
       CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, dotId TEXT NOT NULL, ownerId TEXT NOT NULL, ordinal INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, toolCallId TEXT, toolResult TEXT, createdAt INTEGER NOT NULL, UNIQUE(threadId, ordinal));
-      CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, status TEXT NOT NULL, startedAt INTEGER NOT NULL, finishedAt INTEGER, error TEXT);
+      CREATE TABLE IF NOT EXISTS conversation_runs(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, status TEXT NOT NULL, startedAt INTEGER NOT NULL, finishedAt INTEGER, error TEXT);
       CREATE TABLE IF NOT EXISTS ag_ui_events(id INTEGER PRIMARY KEY AUTOINCREMENT, threadId TEXT NOT NULL, runId TEXT NOT NULL, seq INTEGER NOT NULL, payload TEXT NOT NULL, createdAt INTEGER NOT NULL, UNIQUE(runId, seq));
       CREATE TABLE IF NOT EXISTS connector_inbound(id INTEGER PRIMARY KEY AUTOINCREMENT, platform TEXT NOT NULL, updateId TEXT NOT NULL, offset INTEGER NOT NULL, createdAt INTEGER NOT NULL, UNIQUE(platform, updateId));
       CREATE TABLE IF NOT EXISTS connector_outbound(id TEXT PRIMARY KEY, threadId TEXT NOT NULL, runId TEXT, status TEXT NOT NULL, payload TEXT NOT NULL, error TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL);
-      CREATE INDEX IF NOT EXISTS runs_thread ON runs(threadId, startedAt);
+      CREATE INDEX IF NOT EXISTS conversation_runs_thread ON conversation_runs(threadId, startedAt);
       CREATE INDEX IF NOT EXISTS connector_inbound_offset ON connector_inbound(platform, offset);
       CREATE INDEX IF NOT EXISTS connector_outbound_status ON connector_outbound(threadId, status);`);
     // Additive forward compatibility: new columns arrive via ALTER TABLE ADD
@@ -191,7 +191,9 @@ export class ConversationStore {
       error: null,
     };
     this.db
-      .prepare("INSERT INTO runs VALUES (?, ?, 'running', ?, NULL, NULL)")
+      .prepare(
+        "INSERT INTO conversation_runs VALUES (?, ?, 'running', ?, NULL, NULL)",
+      )
       .run(run.id, run.threadId, run.startedAt);
     return run;
   }
@@ -263,12 +265,14 @@ export class ConversationStore {
   }
   run(id: string): ConversationRun | undefined {
     return this.db
-      .prepare('SELECT * FROM runs WHERE id=?')
+      .prepare('SELECT * FROM conversation_runs WHERE id=?')
       .get(id) as unknown as ConversationRun | undefined;
   }
   runs(threadId: string): ConversationRun[] {
     return this.db
-      .prepare('SELECT * FROM runs WHERE threadId=? ORDER BY startedAt')
+      .prepare(
+        'SELECT * FROM conversation_runs WHERE threadId=? ORDER BY startedAt',
+      )
       .all(threadId) as unknown as ConversationRun[];
   }
   finishRun(
@@ -280,7 +284,7 @@ export class ConversationStore {
       const now = Date.now();
       const result = this.db
         .prepare(
-          "UPDATE runs SET status=?, finishedAt=?, error=? WHERE id=? AND status='running'",
+          "UPDATE conversation_runs SET status=?, finishedAt=?, error=? WHERE id=? AND status='running'",
         )
         .run(status, now, error, id);
       if (Number(result.changes) === 0) {

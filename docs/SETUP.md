@@ -67,23 +67,23 @@ For this preview, run OpenDots directly on your Mac with `npm run dev`; Intellig
 
 Edit `.env` on the server and restart after changes:
 
-| Variable                                             | Purpose                                                                |
-| ---------------------------------------------------- | ---------------------------------------------------------------------- |
-| `INTELLIGENCE_API_KEY`                               | Project credential for conversation persistence                        |
-| `INTELLIGENCE_API_URL`                               | API endpoint override for your Intelligence deployment                 |
-| `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_WS_URL` | Gateway WebSocket override (CLI name preferred; legacy name supported) |
-| `OPENAI_API_KEY`, `OPENAI_MODEL`                     | Model credential and model identifier                                  |
-| `OPENAI_BASE_URL`                                    | Compatible model API endpoint                                          |
-| `OWNER_ID`                                           | Stable identity used for this deployment's conversations               |
-| `DATABASE_PATH`                                      | SQLite file containing pages, workspace and work metadata              |
-| `OWNER_TOKEN`                                        | Application access token; required for external bindings               |
-| `APP_ORIGIN`                                         | Comma-separated exact browser origins for a proxy or custom domain     |
+| Variable                                             | Purpose                                                                  |
+| ---------------------------------------------------- | ------------------------------------------------------------------------ |
+| `INTELLIGENCE_API_KEY`                               | Project credential for CopilotKit Intelligence                           |
+| `INTELLIGENCE_API_URL`                               | API endpoint override for your Intelligence deployment                   |
+| `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_WS_URL` | Gateway WebSocket override (CLI name preferred; legacy name supported)   |
+| `OPENAI_API_KEY`, `OPENAI_MODEL`                     | Model credential and model identifier                                    |
+| `OPENAI_BASE_URL`                                    | Compatible model API endpoint                                            |
+| `OWNER_ID`                                           | Stable identity used for this deployment's conversations                 |
+| `DATABASE_PATH`                                      | SQLite file containing pages, conversations, workspace and work metadata |
+| `OWNER_TOKEN`                                        | Application access token; required for external bindings                 |
+| `APP_ORIGIN`                                         | Comma-separated exact browser origins for a proxy or custom domain       |
 
 `npx copilotkit project select` deletes an `INTELLIGENCE_API_KEY` line and writes the same credential as `CPK_INTELLIGENCE_API_KEY`. The server reads either name. A non-empty `CPK_INTELLIGENCE_API_KEY` takes precedence over `INTELLIGENCE_API_KEY`.
 
 A non-empty `INTELLIGENCE_GATEWAY_WS_URL` takes precedence over `INTELLIGENCE_WS_URL`. Without either WebSocket override, OpenDots uses the hosted gateway. Set both the API and gateway endpoints when connecting a self-hosted deployment.
 
-The model environment variable names follow the configured provider adapter. Provider credentials belong in `.env`, not client-side variables or source code. Conversation history lives in the configured Intelligence project; copying the SQLite file alone does not back up that history.
+The model environment variable names follow the configured provider adapter. Provider credentials belong in `.env`, not client-side variables or source code. See [Data and privacy](../README.md#data-and-privacy) for where conversation history and SQLite data are stored.
 
 ## Pages and page conversations
 
@@ -91,11 +91,11 @@ Select a Space to open its page library. Search for a document, switch between g
 
 Page actions include creating subpages, moving a page within its Space, deleting a page (its subpages move up to the deleted page's parent), and editing Markdown source. Existing documents with unsupported visual-editor syntax stay in source mode to preserve their content. Manual editing works without conversation credentials.
 
-Open a page's chat and choose a specialist with access to that Space. Grant access from the Dot’s settings in the sidebar. The server creates or reuses a CopilotKit Thread for that page and specialist. The Dot receives the current saved page as context and can read, create, and edit pages in its authorized Spaces. The page conversation uses that page’s Space by default; other chats use the Dot’s default page destination. Save your manual edits before asking it to revise the document. Revision checks reject stale writes; a conflict keeps your local draft available for recovery. Failed saves stop automatic retries until you retry or resolve the conflict, so a disconnected session does not silently replace newer content.
+Open a page's chat and choose a specialist with access to that Space. Grant access from the Dot’s settings in the sidebar. The server creates or reuses a local thread for that page and specialist. The Dot receives the current saved page as context and can read, create, and edit pages in its authorized Spaces. The page conversation uses that page’s Space by default; other chats use the Dot’s default page destination. Save your manual edits before asking it to revise the document. Revision checks reject stale writes; a conflict keeps your local draft available for recovery. Failed saves stop automatic retries until you retry or resolve the conflict, so a disconnected session does not silently replace newer content.
 
 Use the conversation's save-to-page action to create a document from its saved text history. This requires a working conversation service. Pages retain a link to the source conversation, and page links in chat open the document workspace.
 
-Back up both storage layers: SQLite contains page content and thread bindings; the Intelligence project contains conversation history. The template does not include multi-user page sharing, realtime collaboration, file uploads, or arbitrary interactive embeds.
+Back up the SQLite database: it contains page content, thread bindings, and conversation history. The template does not include multi-user page sharing, realtime collaboration, file uploads, or arbitrary interactive embeds.
 
 ## Browser tool
 

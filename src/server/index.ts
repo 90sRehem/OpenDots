@@ -1,6 +1,6 @@
 import { webSearchProvider } from './parallel.js';
 import { createShutdown } from './shutdown.js';
-import { reportChannelFailure, safeFailure } from './slack-channel.js';
+import { reportChannelFailure, safeFailure } from './channel-errors.js';
 import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Store } from './store.js';
@@ -9,6 +9,7 @@ import { createApp } from './app.js';
 import { resolveAppOrigins } from './app-origin.js';
 import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
+import { ConversationStore } from './conversation-store.js';
 import {
   intelligenceApiKeyFromEnv,
   intelligenceWsUrlFromEnv,
@@ -58,7 +59,8 @@ const config: PlatformConfig = {
   runtimeUrl: `http://${host === '::1' ? '[::1]' : '127.0.0.1'}:${port}/api/copilotkit`,
   ownerToken,
 };
-const platform = new Platform(store, workspace, config);
+const conversationStore = new ConversationStore(database);
+const platform = new Platform(store, workspace, config, conversationStore);
 const researchConfig = {
   mode: 'live' as const,
   apiKey: config.apiKey,
@@ -114,10 +116,9 @@ const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   void platform
     .start()
     .catch((error) =>
-      reportChannelFailure(
-        'Slack Channels activation failed; check setup status',
-        [safeFailure(error)],
-      ),
+      reportChannelFailure('Setup telemetry start failed', [
+        safeFailure(error),
+      ]),
     );
 });
 const shutdown = createShutdown({

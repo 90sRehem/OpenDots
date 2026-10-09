@@ -4,12 +4,12 @@ OpenDots tracks its existing browser setup flow through the server's CopilotKit 
 
 Telemetry is enabled by default. Either `DO_NOT_TRACK=true|1` or `COPILOTKIT_TELEMETRY_DISABLED=true|1` disables the setup emitter and runtime. Restart after changing the server environment. Opt-out deletes the setup tracking row, including its pending queue and fallback installation identity. It does not change the owner, conversations, or application settings. Sampling rate zero also suppresses setup events.
 
-| Event                           | Closed properties                                                                                                    |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `oss.runtime.setup_step_viewed` | `kind=step_viewed`, step: `setup_required`, `ready`, `settings`                                                      |
-| `oss.runtime.setup_failed`      | `kind=setup_failed`, step enum, error class: `configuration_missing`, `assistant_run_failed`, `channel_start_failed` |
-| `oss.runtime.setup_activated`   | `kind=activated`                                                                                                     |
-| `oss.runtime.setup_abandoned`   | `kind=setup_abandoned`, last step enum                                                                               |
+| Event                           | Closed properties                                                                            |
+| ------------------------------- | -------------------------------------------------------------------------------------------- |
+| `oss.runtime.setup_step_viewed` | `kind=step_viewed`, step: `setup_required`, `ready`, `settings`                              |
+| `oss.runtime.setup_failed`      | `kind=setup_failed`, step enum, error class: `configuration_missing`, `assistant_run_failed` |
+| `oss.runtime.setup_activated`   | `kind=activated`                                                                             |
+| `oss.runtime.setup_abandoned`   | `kind=setup_abandoned`, last step enum                                                       |
 
 `ready` means required server configuration exists. Activation requires an assistant message with nonempty streamed text and a successful AG-UI `RUN_FINISHED`, with no run error, abort, or timeout. It is recorded once per installation and remains deduplicated across server restarts. User messages, partial answers, tool-only runs, and configuration readiness do not activate the installation. Server-managed conversations, including Slack when configured, share this installation activation.
 
