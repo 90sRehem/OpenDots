@@ -106,7 +106,10 @@ export class TelegramChannel {
     }
 
     const dot = this.workspace.dots()[0];
-    if (!dot) return;
+    if (!dot) {
+      this.store.admitInbound(PLATFORM, String(update.update_id), update.update_id);
+      return;
+    }
     const threadId = `telegram-${message.chat.id}`;
     try {
       this.workspace.requireThread(threadId, dot.id);
@@ -172,7 +175,7 @@ export class TelegramChannel {
     }
     if (!failed && reply.trim()) {
       const outbound = this.store.queueOutbound(threadId, admitted.run.id, {
-        chatId: message.chat.id,
+        chat_id: message.chat.id,
         text: reply,
       });
       await this.deliver(outbound.id);
@@ -185,7 +188,7 @@ export class TelegramChannel {
         if (run.status !== 'running') continue;
         this.store.finishRun(run.id, 'interrupted', 'Run interrupted by process restart.');
         const outbound = this.store.queueOutbound(thread.id, run.id, {
-          chatId: Number(this.ownerId),
+          chat_id: Number(this.ownerId),
           text: INTERRUPTED_NOTICE,
         });
         await this.deliver(outbound.id);

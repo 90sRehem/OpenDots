@@ -100,9 +100,19 @@ it('admits an allow-listed private message, runs the agent, and replies in the s
   expect(f.store.messages('telegram-2002').map((entry) => entry.role)).toEqual(['user', 'assistant']);
   expect(f.store.runs('telegram-2002').map((run) => run.status)).toEqual(['completed']);
   const sent = requests.find(({ url }) => url.pathname.endsWith('/sendMessage'))!;
-  expect(JSON.parse(String(sent.init?.body))).toEqual({ chatId: 2002, text: 'Hello from Dot.' });
+  expect(JSON.parse(String(sent.init?.body))).toEqual({ chat_id: 2002, text: 'Hello from Dot.' });
   expect(f.store.pendingOutbound()).toHaveLength(0);
   expect(f.store.highWaterOffset('telegram')).toBe(10);
+});
+
+it('advances the durable offset when no Dot is available to run the message', async () => {
+  const f = fixture();
+  vi.spyOn(f.workspace, 'dots').mockReturnValue([]);
+  fakeTelegram([messageUpdate(15)]);
+  await f.connector.pollOnce();
+  expect(f.agentFactory).not.toHaveBeenCalled();
+  expect(f.store.runs('telegram-2002')).toHaveLength(0);
+  expect(f.store.highWaterOffset('telegram')).toBe(15);
 });
 
 it('deduplicates redelivered update ids and never performs another outbound attempt', async () => {
@@ -182,7 +192,7 @@ it('sends a single owner resend notice for an interrupted run, including across 
     .map(({ init }) => JSON.parse(String(init?.body)));
   expect(notices).toEqual([
     {
-      chatId: 1001,
+      chat_id: 1001,
       text: 'A previous run was interrupted. Please resend your message to continue.',
     },
   ]);
