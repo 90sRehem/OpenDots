@@ -167,9 +167,9 @@ it('carries the channel label through clone()', async () => {
       .run({ ...f.input, threadId: 'cloned-channel-thread' })
       .pipe(toArray()),
   );
-  expect(f.workspace.requireThread('cloned-channel-thread', f.dot.id).title).toBe(
-    'Telegram conversation',
-  );
+  expect(
+    f.workspace.requireThread('cloned-channel-thread', f.dot.id).title,
+  ).toBe('Telegram conversation');
 });
 it('replaces channel RUN_ERROR payload entirely before the SDK renderer sees it', async () => {
   const f = fixture();

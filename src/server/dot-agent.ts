@@ -89,11 +89,7 @@ export class DotAgent extends AbstractAgent {
             .conversations()
             .some((thread) => thread.id === input.threadId)
         )
-          this.workspace.bindThread(
-            input.threadId,
-            dot.id,
-            this.channelLabel,
-          );
+          this.workspace.bindThread(input.threadId, dot.id, this.channelLabel);
         const conversation = this.workspace.requireThread(
           input.threadId,
           dot.id,
