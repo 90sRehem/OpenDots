@@ -116,6 +116,11 @@ export async function runThreadTurn(
               runError = new Error((event as RunErrorEvent).message);
             }
           },
+          error: (error) => {
+            runError =
+              error instanceof Error ? error : new Error(String(error));
+            resolve();
+          },
           complete: resolve,
         });
     });
