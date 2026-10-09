@@ -1,6 +1,7 @@
 import type { Message } from '@ag-ui/core';
 
-// Message IDs survive Intelligence history replay even when metadata does not.
+// A durable marker for scheduled-task prompts in the canonical transcript. The
+// message ID identifies a scheduled turn on its own.
 export const scheduledTaskMessagePrefix = 'opendots:scheduled_task:';
 
 export function isScheduledTaskMessage(
