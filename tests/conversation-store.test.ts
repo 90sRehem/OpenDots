@@ -158,6 +158,29 @@ describe('restart durability', () => {
 });
 
 describe('connector_inbound uniqueness', () => {
+  it('commits an inbound update and its turn atomically and returns null for a duplicate', () => {
+    const { store } = fixture();
+    const params = {
+      platform: 'telegram',
+      updateId: 'update-atomic',
+      offset: 14,
+      threadId: 'thread-atomic',
+      dotId: 'dot-1',
+      ownerId: 'owner-1',
+      role: 'user' as const,
+      content: { id: 'message-1', role: 'user', content: 'hello' },
+    };
+    const admitted = store.admitInboundTurn(params);
+    expect(admitted).not.toBeNull();
+    expect(store.highWaterOffset('telegram')).toBe(14);
+    expect(store.messages('thread-atomic')).toHaveLength(1);
+    expect(store.runs('thread-atomic')).toHaveLength(1);
+    expect(store.events(admitted!.run.id)).toHaveLength(1);
+    expect(store.admitInboundTurn({ ...params, offset: 15 })).toBeNull();
+    expect(store.highWaterOffset('telegram')).toBe(14);
+    expect(store.messages('thread-atomic')).toHaveLength(1);
+    expect(store.runs('thread-atomic')).toHaveLength(1);
+  });
   it('rejects a duplicate (platform, update_id) pair via the database constraint', () => {
     const { store } = fixture();
     expect(store.admitInbound('telegram', 'update-1', 1)).toBe(true);
