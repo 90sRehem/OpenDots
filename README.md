@@ -139,15 +139,13 @@ flowchart TB
   Runtime --> Agents
   Agents --> AI[TanStack AI]
   AI --> Provider[OpenAI-compatible model provider]
-  Runtime <--> Intelligence["Intelligence / Threads"]
-  Channels <--> Intelligence
   Web <--> Speech[Realtime speech]
   Speech --> Bridge[Compute bridge]
   Bridge --> Agents
   Agents --> Controls[Tool permissions]
   Controls --> Computer[Isolated browser / workspace]
   Agents --> Jobs[Background work]
-  Runtime --> Metadata[(Pages, Spaces, Dots, work metadata)]
+  Runtime <--> SQLite[(Pages, Spaces, Dots, conversations, work metadata)]
 ```
 
 You configure the Intelligence project, model provider, and channel connection for your deployment; calls also need a speech provider. Credentials stay on the server. Missing configuration should produce a clear setup state, and test fixtures should remain visibly separate from live integrations.
