@@ -116,10 +116,9 @@ const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   void platform
     .start()
     .catch((error) =>
-      reportChannelFailure(
-        'Slack Channels activation failed; check setup status',
-        [safeFailure(error)],
-      ),
+      reportChannelFailure('Setup telemetry start failed', [
+        safeFailure(error),
+      ]),
     );
 });
 const shutdown = createShutdown({
