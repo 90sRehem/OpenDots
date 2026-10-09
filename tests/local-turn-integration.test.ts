@@ -189,6 +189,37 @@ it('gives a scheduled task and a web-chat message one canonical thread that both
   expect(modelRuns).toBe(2);
 });
 
+it('saves a page conversation from the same committed transcript used by direct chat', async () => {
+  mockModel();
+  const { platform, workspace, conversationStore } = open(openDatabase());
+  const dot = workspace.dots()[0];
+  const page = workspace.pages.create(dot.spaceId, {
+    title: 'Page conversation',
+  });
+  const thread = await platform.pages.conversation(
+    dot.spaceId,
+    page.id,
+    dot.id,
+  );
+
+  expect(
+    await platform.turn(
+      thread.id,
+      'Page question',
+      new AbortController().signal,
+    ),
+  ).toBe('Answer to: Page question');
+  expect(workspace.conversations()).toHaveLength(1);
+  expect(
+    conversationStore.messages(thread.id).map((message) => message.role),
+  ).toEqual(['user', 'assistant']);
+
+  const saved = await platform.pages.saveConversation(thread.id, 'Saved', null);
+  expect(saved.content).toBe(
+    '## You\n\nPage question\n\n## Dot\n\nAnswer to: Page question',
+  );
+});
+
 it('runs voice compute and the call receipt on the existing thread, and drops a duplicate receipt', async () => {
   mockModel();
   const database = openDatabase();

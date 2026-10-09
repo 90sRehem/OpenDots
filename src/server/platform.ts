@@ -1,6 +1,6 @@
 import { ComputerService } from './computer-service.js';
 import { ConnectionService } from './connections.js';
-import { PageService } from './page-service.js';
+import { localPageIntelligence, PageService } from './page-service.js';
 import { randomUUID } from 'node:crypto';
 import {
   CopilotRuntime,
@@ -42,30 +42,13 @@ export class Platform {
       () => store.settings().paused,
     );
     this.connections = new ConnectionService(workspace.connections);
+    const pageIntelligence = localPageIntelligence(
+      workspace,
+      conversationStore,
+    );
     this.pages = new PageService(workspace, () => {
       this.requireReady();
-      return {
-        getOrCreateThread: async (input) => {
-          const existing = workspace
-            .conversations()
-            .some((thread) => thread.id === input.threadId);
-          return existing
-            ? workspace.requireThread(input.threadId, input.agentId)
-            : workspace.bindThread(input.threadId, input.agentId, input.name);
-        },
-        getThreadMessages: async ({ threadId }) => ({
-          messages: conversationStore.messages(threadId).map((message) => {
-            const content = message.content as { content?: unknown };
-            return {
-              role: message.role,
-              content:
-                content && typeof content === 'object' && 'content' in content
-                  ? content.content
-                  : message.content,
-            };
-          }),
-        }),
-      };
+      return pageIntelligence;
     });
     // Web chat, scheduled tasks, and voice compute all share this runner, so
     // they share one canonical transcript per thread.

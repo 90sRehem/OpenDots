@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { PageError } from './pages.js';
+import type { ConversationStore } from './conversation-store.js';
 import type { WorkspaceStore } from './workspace.js';
 export interface PageIntelligence {
   getOrCreateThread(input: {
@@ -12,6 +13,33 @@ export interface PageIntelligence {
     threadId: string;
     userId: string;
   }): Promise<{ messages: { role: string; content?: unknown }[] }>;
+}
+export function localPageIntelligence(
+  workspace: WorkspaceStore,
+  conversationStore: ConversationStore,
+): PageIntelligence {
+  return {
+    getOrCreateThread: async ({ threadId, agentId, name }) => {
+      const existing = workspace
+        .conversations()
+        .some((thread) => thread.id === threadId);
+      return existing
+        ? workspace.requireThread(threadId, agentId)
+        : workspace.bindThread(threadId, agentId, name);
+    },
+    getThreadMessages: async ({ threadId }) => ({
+      messages: conversationStore.messages(threadId).map((message) => {
+        const content = message.content as { content?: unknown };
+        return {
+          role: message.role,
+          content:
+            content && typeof content === 'object' && 'content' in content
+              ? content.content
+              : message.content,
+        };
+      }),
+    }),
+  };
 }
 async function bounded<T>(operation: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
