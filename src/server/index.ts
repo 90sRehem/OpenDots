@@ -87,9 +87,6 @@ const runner = new Runner(
     return { text, sources: [], sample: false };
   },
 );
-const wsOrigin = new URL(
-  config.intelligenceWsUrl ?? 'wss://realtime.intelligence.copilotkit.ai',
-).origin;
 const app = createApp({
   store,
   runner,
@@ -103,7 +100,7 @@ app.use('*', async (c, next) => {
   c.header('Referrer-Policy', 'no-referrer');
   c.header(
     'Content-Security-Policy',
-    `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ${wsOrigin}; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
+    `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`,
   );
   await next();
 });
