@@ -39,6 +39,8 @@ afterEach(() => {
   databases.splice(0).forEach((db) => db.close());
   vi.restoreAllMocks();
   inner.configure.mockClear();
+  inner.run.mockClear();
+  inner.abortRun.mockClear();
 });
 
 it('uses the conversation container for delivery and preserves tools and override restrictions', async () => {
@@ -100,7 +102,7 @@ it('uses the conversation container for delivery and preserves tools and overrid
 });
 function fixture(
   channel = true,
-  intelligenceKey: string | undefined = 'fixture',
+  intelligenceKey: string | null = 'fixture',
   channelLabel = 'Channel conversation',
 ) {
   const store = new Store(':memory:');
@@ -139,10 +141,10 @@ function fixture(
 }
 
 it('runs with an API key and model when intelligenceKey is unset', async () => {
-  const f = fixture(false, undefined);
+  const f = fixture(false, null);
   inner.run.mockReturnValue(of());
   await lastValueFrom(f.agent.run(f.input).pipe(toArray()));
-  expect(inner.run).toHaveBeenCalled();
+  expect(inner.run).toHaveBeenCalledOnce();
 });
 
 it('binds a new channel thread using its supplied label', async () => {
