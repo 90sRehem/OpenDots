@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { EventType } from '@ag-ui/core';
 import { expect, it, vi } from 'vitest';
 import { Platform } from '../src/server/platform.js';
+import { ConversationStore } from '../src/server/conversation-store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import { createApp } from '../src/server/app.js';
 import { Runner } from '../src/server/runner.js';
@@ -158,12 +159,18 @@ it('activates only after a successful assistant answer and records a bounded fai
 it('protects the browser route with owner auth and origin guards and rejects forged readiness', async () => {
   const store = new Store(':memory:');
   const workspace = new WorkspaceStore(':memory:', 'fixture-owner');
-  const platform = new Platform(store, workspace, {
-    baseUrl: '',
-    runtimeUrl: '',
-    voiceName: 'marin',
-    slackUsers: [],
-  });
+  const conversationStore = new ConversationStore(':memory:');
+  const platform = new Platform(
+    store,
+    workspace,
+    {
+      baseUrl: '',
+      runtimeUrl: '',
+      voiceName: 'marin',
+      slackUsers: [],
+    },
+    conversationStore,
+  );
   const config = { mode: 'sample' as const, baseUrl: '' };
   const app = createApp({
     store,
@@ -208,6 +215,7 @@ it('protects the browser route with owner auth and origin guards and rejects for
   ).toBe(200);
   store.close();
   workspace.close();
+  conversationStore.close();
 });
 
 it('does not activate from user text, partial answers or tool-only success', () => {

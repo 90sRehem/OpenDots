@@ -8,6 +8,10 @@ const platformUrl = new URL('../src/server/platform.ts', import.meta.url).href;
 const storeUrl = new URL('../src/server/store.ts', import.meta.url).href;
 const workspaceUrl = new URL('../src/server/workspace.ts', import.meta.url)
   .href;
+const conversationStoreUrl = new URL(
+  '../src/server/conversation-store.ts',
+  import.meta.url,
+).href;
 const tsxUrl = import.meta.resolve('tsx');
 
 // Intercept the real SDK transport before import, in a fresh process so its
@@ -21,29 +25,36 @@ globalThis.fetch = async (url, options) => {
 const { Platform } = await import(${JSON.stringify(platformUrl)});
 const { Store } = await import(${JSON.stringify(storeUrl)});
 const { WorkspaceStore } = await import(${JSON.stringify(workspaceUrl)});
+const { ConversationStore } = await import(${JSON.stringify(conversationStoreUrl)});
+const { ProxiedCopilotRuntimeAgent } = await import('@copilotkit/core');
 const store = new Store(':memory:');
 const workspace = new WorkspaceStore(':memory:', 'fixture-owner');
+const conversationStore = new ConversationStore(':memory:');
 try {
   const platform = new Platform(store, workspace, {
     intelligenceKey: 'test-project-key-never-sent',
     baseUrl: '', runtimeUrl: '', voiceName: 'marin', slackUsers: [],
-  });
-  await platform.handle(new Request('http://localhost/api/copilotkit/info'));
+  }, conversationStore);
   const dot = workspace.dots()[0];
   workspace.bindThread('fixture-thread', dot.id, 'Fixture');
-  // Reach the SDK request handler, then fail body validation before any agent run.
-  const response = await platform.handle(new Request(
-    'http://localhost/api/copilotkit/agent/' + dot.id + '/run', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ threadId: 'fixture-thread', messages: 'invalid' }),
-    },
-  ));
-  if (response.status !== 400) throw new Error('Expected SDK body validation failure');
+  const localFetch = async (input, init) => {
+    const request = input instanceof Request ? input : new Request(input, init);
+    return platform.handle(request);
+  };
+  const proxy = new ProxiedCopilotRuntimeAgent({
+    runtimeUrl: 'http://localhost/api/copilotkit',
+    agentId: 'fixture-client',
+    runtimeAgentId: dot.id,
+    fetch: localFetch,
+  });
+  proxy.threadId = 'fixture-thread';
+  await proxy.connectAgent();
   await new Promise(resolve => setImmediate(resolve));
   console.log(JSON.stringify(requests));
 } finally {
   store.close();
   workspace.close();
+  conversationStore.close();
 }
 `;
 

@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { Store } from '../src/server/store.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import { Platform } from '../src/server/platform.js';
+import { ConversationStore } from '../src/server/conversation-store.js';
 import { Runner } from '../src/server/runner.js';
 import { createApp } from '../src/server/app.js';
 const cleanup: (() => void)[] = [];
@@ -9,17 +10,24 @@ afterEach(() => cleanup.splice(0).forEach((fn) => fn()));
 function fixture(ownerToken?: string) {
   const store = new Store(':memory:');
   const ws = new WorkspaceStore(':memory:', 'owner');
+  const conversationStore = new ConversationStore(':memory:');
   cleanup.push(() => {
     store.close();
     ws.close();
+    conversationStore.close();
   });
   const config = { mode: 'live' as const, baseUrl: 'https://example.com' };
-  const platform = new Platform(store, ws, {
-    baseUrl: config.baseUrl,
-    voiceName: 'marin',
-    slackUsers: [],
-    runtimeUrl: '',
-  });
+  const platform = new Platform(
+    store,
+    ws,
+    {
+      baseUrl: config.baseUrl,
+      voiceName: 'marin',
+      slackUsers: [],
+      runtimeUrl: '',
+    },
+    conversationStore,
+  );
   return {
     ws,
     platform,
