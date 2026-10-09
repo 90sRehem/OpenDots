@@ -39,6 +39,8 @@ afterEach(() => {
   databases.splice(0).forEach((db) => db.close());
   vi.restoreAllMocks();
   inner.configure.mockClear();
+  inner.run.mockClear();
+  inner.abortRun.mockClear();
 });
 
 it('uses the conversation container for delivery and preserves tools and override restrictions', async () => {
@@ -98,7 +100,11 @@ it('uses the conversation container for delivery and preserves tools and overrid
     expect.objectContaining({ learnedSkills: undefined, type: 'tanstack' }),
   );
 });
-function fixture(channel = true) {
+function fixture(
+  channel = true,
+  intelligenceKey: string | null = 'fixture',
+  channelLabel = 'Channel conversation',
+) {
   const store = new Store(':memory:');
   const workspace = new WorkspaceStore(':memory:', 'owner');
   databases.push(store, workspace);
@@ -109,7 +115,7 @@ function fixture(channel = true) {
     store,
     workspace,
     {
-      intelligenceKey: 'fixture',
+      ...(intelligenceKey ? { intelligenceKey } : {}),
       apiKey: 'fixture',
       model: 'fixture',
       baseUrl: 'https://unused.invalid',
@@ -120,6 +126,7 @@ function fixture(channel = true) {
     dot.id,
     channel,
     telemetry,
+    channelLabel,
   );
   const input: RunAgentInput = {
     threadId: 'thread',
@@ -130,8 +137,40 @@ function fixture(channel = true) {
     context: [],
     forwardedProps: {},
   };
-  return { agent, input, workspace, telemetry };
+  return { agent, input, workspace, telemetry, dot };
 }
+
+it('runs with an API key and model when intelligenceKey is unset', async () => {
+  const f = fixture(false, null);
+  inner.run.mockReturnValue(of());
+  await lastValueFrom(f.agent.run(f.input).pipe(toArray()));
+  expect(inner.run).toHaveBeenCalledOnce();
+});
+
+it('binds a new channel thread using its supplied label', async () => {
+  const f = fixture(true, 'fixture', 'Telegram conversation');
+  inner.run.mockReturnValue(of());
+  await lastValueFrom(
+    f.agent.run({ ...f.input, threadId: 'new-channel-thread' }).pipe(toArray()),
+  );
+  expect(f.workspace.requireThread('new-channel-thread', f.dot.id).title).toBe(
+    'Telegram conversation',
+  );
+});
+
+it('carries the channel label through clone()', async () => {
+  const f = fixture(true, 'fixture', 'Telegram conversation');
+  inner.run.mockReturnValue(of());
+  await lastValueFrom(
+    f.agent
+      .clone()
+      .run({ ...f.input, threadId: 'cloned-channel-thread' })
+      .pipe(toArray()),
+  );
+  expect(
+    f.workspace.requireThread('cloned-channel-thread', f.dot.id).title,
+  ).toBe('Telegram conversation');
+});
 it('replaces channel RUN_ERROR payload entirely before the SDK renderer sees it', async () => {
   const f = fixture();
   inner.run.mockReturnValue(

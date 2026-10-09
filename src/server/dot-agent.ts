@@ -40,6 +40,7 @@ export class DotAgent extends AbstractAgent {
     private dotId: string,
     private channel = false,
     private setupTelemetry?: SetupTelemetry,
+    private channelLabel = 'Channel conversation',
   ) {
     super({ agentId: dotId });
   }
@@ -51,6 +52,7 @@ export class DotAgent extends AbstractAgent {
       this.dotId,
       this.channel,
       this.setupTelemetry,
+      this.channelLabel,
     );
   }
   abortRun() {
@@ -87,27 +89,19 @@ export class DotAgent extends AbstractAgent {
             .conversations()
             .some((thread) => thread.id === input.threadId)
         )
-          this.workspace.bindThread(
-            input.threadId,
-            dot.id,
-            'Slack conversation',
-          );
+          this.workspace.bindThread(input.threadId, dot.id, this.channelLabel);
         const conversation = this.workspace.requireThread(
           input.threadId,
           dot.id,
         );
-        if (
-          !this.config.intelligenceKey ||
-          !this.config.apiKey ||
-          !this.config.model
-        ) {
+        if (!this.config.apiKey || !this.config.model) {
           configurationFailure = true;
           this.setupTelemetry?.capture({
             kind: 'setup_failed',
             step: 'setup_required',
             error_class: 'configuration_missing',
           });
-          throw new Error('Intelligence and model configuration are required.');
+          throw new Error('API and model configuration are required.');
         }
         const initialSettings = this.store.settings();
         const initialConnections = this.workspace.connections.fingerprint(

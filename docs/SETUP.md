@@ -27,7 +27,7 @@ Open http://127.0.0.1:4310. Keep the server running for background work.
 
 ## Conversation services
 
-OpenDots requires CopilotKit Intelligence for conversations. Choose local evaluation below, a licensed [self-hosted deployment](https://docs.copilotkit.ai/intelligence/self-hosting), or hosted Intelligence. See [Data and privacy](../README.md#data-and-privacy) for where conversation history and SQLite data are stored.
+Text conversations need only a model provider: set `OPENAI_API_KEY` and `OPENAI_MODEL` in `.env` (see [Connection settings](#connection-settings)). CopilotKit Intelligence is optional and enables Slack, Automatic Learning, and server-side voice or scheduled compute; choose local evaluation below, a licensed [self-hosted deployment](https://docs.copilotkit.ai/intelligence/self-hosting), or hosted Intelligence. See [Data and privacy](../README.md#data-and-privacy) for where conversation history and SQLite data are stored.
 
 ### Hosted Intelligence
 
