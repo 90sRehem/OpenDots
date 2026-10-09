@@ -25,6 +25,20 @@ const RESTART_INTERRUPT_REASON =
 const STOP_INTERRUPT_REASON =
   'Run stopped by request. Review completed effects before retrying.';
 
+/**
+ * Marker payload `type` recorded once per run, durably, under the store's
+ * own `run.id` (an internal UUID unrelated to the AG-UI protocol `runId`
+ * the client actually sent). `ActiveRun.runId` holds this for a run still
+ * in memory, but that is lost the moment a run finishes and `this.active`
+ * drops it; a later `connect()` synthesizing a terminal event for that now
+ * *historic* run needs the real client `runId` back (not the store's own
+ * `run.id`) to avoid exactly the kind of runId mismatch `84990fd` fixed for
+ * `stop()`. Never a real AG-UI `EventType`, so `connect()` strips it from
+ * replay the same way it strips the store's other non-AG-UI bookkeeping
+ * rows.
+ */
+const RUN_ID_MARKER = '__conversation-runner:run-id__';
+
 interface ActiveRun {
   run: ConversationRun;
   runId: string;
@@ -110,6 +124,25 @@ export class ConversationRunner extends AgentRunner {
     const { threadId } = request;
     this.reconcileThread(threadId);
     const active = this.active.get(threadId);
+    // A `MESSAGES_SNAPSHOT` built from this store's own canonical `messages`
+    // table rather than reconstructed from the replayed event stream: a
+    // viewer's `.messages` is then correct immediately on connect,
+    // independent of whether any individual historic run's events happen to
+    // carry enough detail to rebuild it from scratch.
+    const snapshot = this.canonicalMessages(threadId);
+    // Every id in `snapshot` is already fully represented there, content
+    // and all, so a historic run's own recorded `TEXT_MESSAGE_*`/
+    // `TOOL_CALL_*` events for the same id are never also replayed below -
+    // a client applying both (the snapshot message plus a replayed delta
+    // for the same id) would double its content, since `defaultApplyEvents`
+    // does not reset an already-present snapshot message on a replayed
+    // `TEXT_MESSAGE_START`.
+    const emittedMessageIds = new Set(snapshot.map((message) => message.id));
+    const emittedToolCallIds = new Set<string>();
+    for (const message of snapshot)
+      if (message.role === 'assistant')
+        for (const call of message.toolCalls ?? [])
+          emittedToolCallIds.add(call.id);
     // The active run's own events are sourced live from its buffered
     // `liveSubject` below (which has replayed everything since that run
     // started), so the historic DB read excludes it to avoid emitting every
@@ -117,18 +150,53 @@ export class ConversationRunner extends AgentRunner {
     const historic: BaseEvent[] = [];
     for (const run of this.store.runs(threadId)) {
       if (active && run.id === active.run.id) continue;
-      for (const event of this.store.events(run.id))
-        historic.push(event.payload as BaseEvent);
+      // Recovered from this run's own `RUN_ID_MARKER` row (recorded once,
+      // durably, at admission) if present; falls back to the store's
+      // internal `run.id` for a run that predates that marker existing.
+      let runId: string = run.id;
+      for (const event of this.store.events(run.id)) {
+        const payload = event.payload as BaseEvent & Record<string, unknown>;
+        if ((payload.type as string) === RUN_ID_MARKER) {
+          if (typeof payload.runId === 'string') runId = payload.runId;
+          continue;
+        }
+        // `admitTurn`/`finishRun`'s own RUN_STARTED/RUN_FINISHED/RUN_ERROR
+        // bookkeeping rows are this store's authority for a run's
+        // start/end, but they are not schema-valid AG-UI events on their
+        // own (no `threadId`/`runId`): the OSS client's
+        // `EventSchemas.parse` rejects the first one it sees on reconnect
+        // and silently drops every remaining replayed event behind it. One
+        // synthesized, schema-valid terminal event per historic run
+        // (below) stands in for all of them instead.
+        if (
+          payload.type === EventType.RUN_STARTED ||
+          payload.type === EventType.RUN_FINISHED ||
+          payload.type === EventType.RUN_ERROR
+        )
+          continue;
+        const messageId =
+          typeof payload.messageId === 'string' ? payload.messageId : undefined;
+        const toolCallId =
+          typeof payload.toolCallId === 'string'
+            ? payload.toolCallId
+            : undefined;
+        if (messageId && emittedMessageIds.has(messageId)) continue;
+        if (toolCallId && emittedToolCallIds.has(toolCallId)) continue;
+        historic.push(payload);
+      }
+      historic.push(
+        this.terminalEvent(
+          threadId,
+          runId,
+          run.status as Exclude<RunStatus, 'running'>,
+          run.error,
+        ),
+      );
     }
     const out = new ReplaySubject<BaseEvent>(Infinity);
-    // A `MESSAGES_SNAPSHOT` first, built from this store's own canonical
-    // `messages` table rather than reconstructed from the replayed event
-    // stream: a viewer's `.messages` is then correct immediately on
-    // connect, independent of whether any individual historic run's events
-    // happen to carry enough detail to rebuild it from scratch.
     out.next({
       type: EventType.MESSAGES_SNAPSHOT,
-      messages: this.canonicalMessages(threadId),
+      messages: snapshot,
     } as BaseEvent);
     for (const event of compactEvents(historic)) out.next(event);
     if (!active) {
@@ -271,6 +339,15 @@ export class ConversationRunner extends AgentRunner {
         if (!admittedRun) admittedRun = this.store.admitTurn(params).run;
         else this.store.appendMessage(params);
       }
+      // Durably record the real AG-UI `runId` this run started with, under
+      // the store's own `run.id`, so a later `connect()` -- even after this
+      // process restarts -- can recover it for a historic run's
+      // synthesized terminal event instead of fabricating one from the
+      // store's internal run id (see `RUN_ID_MARKER`).
+      this.store.recordEvent(threadId, admittedRun!.id, {
+        type: RUN_ID_MARKER,
+        runId: request.input.runId,
+      });
     } catch (error) {
       // An unexpected store failure mid-admission (not a validation
       // rejection, which is handled above and never reaches here). If the

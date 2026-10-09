@@ -468,6 +468,42 @@ describe('admission rule', () => {
     ).toBe(true);
   });
 
+  it('ignores a client-supplied ownerId/agentId that attempts to override the server-side scope for the thread', async () => {
+    const { store } = fixtureStore();
+    // This runner's owner/Dot scope is set once, server-side, at
+    // construction (`ownerId`) and per-call via the server-resolved `agent`
+    // instance (`dotId`) - neither is ever read off the client's wire
+    // payload. A client that stuffs forged `ownerId`/`agentId` fields onto
+    // a message or `forwardedProps` anyway (there is no such field on
+    // `AgentRunnerRunRequest`/`Message` for this runner to read in the
+    // first place) must have zero effect on which owner/Dot the turn is
+    // recorded under.
+    const runner = new ConversationRunner(store, 'owner-1');
+    const agent = new EchoAgent('dot-1', 'hi there');
+    const forgedMessage = {
+      id: 'user-forged-scope',
+      role: 'user',
+      content: 'hello',
+      ownerId: 'attacker-owner',
+      agentId: 'attacker-dot',
+    } as unknown as Message;
+    const input = buildInput('thread-forged-scope', 'run-1', [forgedMessage]);
+    (
+      input as unknown as { forwardedProps: Record<string, unknown> }
+    ).forwardedProps = {
+      ownerId: 'attacker-owner',
+      agentId: 'attacker-dot',
+    };
+
+    await collect(runner.run({ threadId: 'thread-forged-scope', agent, input }))
+      .done;
+
+    const stored = store.messages('thread-forged-scope');
+    expect(stored).toHaveLength(2);
+    expect(stored.every((m) => m.ownerId === 'owner-1')).toBe(true);
+    expect(stored.every((m) => m.dotId === 'dot-1')).toBe(true);
+  });
+
   it('admits a valid tool response answering a real pending toolCallId', async () => {
     const { store } = fixtureStore();
     const runner = new ConversationRunner(store, 'owner-1');
@@ -697,7 +733,13 @@ describe('live join, drop, and reconnect through connect()', () => {
     await waitUntil(() => store.runs('thread-7')[0]?.status === 'completed');
     expect(store.runs('thread-7')[0].status).toBe('completed');
 
-    // Reconnect after completion: full history replays from the store.
+    // Reconnect after completion: the `MESSAGES_SNAPSHOT` already carries
+    // the completed run's assistant message in full, so its recorded
+    // TEXT_MESSAGE_*/RUN_STARTED events are not also replayed (that would
+    // double the content client-side, and the store's own RUN_STARTED/
+    // RUN_FINISHED bookkeeping rows are not schema-valid AG-UI events on
+    // their own). A single synthesized, schema-valid RUN_FINISHED stands in
+    // for the finished historic run.
     const reconnectEvents: BaseEvent[] = [];
     runner
       .connect({ threadId: 'thread-7' })
@@ -705,12 +747,70 @@ describe('live join, drop, and reconnect through connect()', () => {
     await flush();
     expect(reconnectEvents.map((e) => e.type)).toEqual([
       EventType.MESSAGES_SNAPSHOT,
-      EventType.RUN_STARTED,
-      EventType.TEXT_MESSAGE_START,
-      EventType.TEXT_MESSAGE_CONTENT,
-      EventType.TEXT_MESSAGE_END,
       EventType.RUN_FINISHED,
     ]);
+    const snapshot = reconnectEvents[0] as BaseEvent & {
+      messages: Message[];
+    };
+    expect(snapshot.messages.map((m) => m.id)).toEqual(['u1', 'm1']);
+    const assistantMessage = snapshot.messages[1] as Message & {
+      content: string;
+    };
+    expect(assistantMessage.content).toBe('partial');
+    const terminal = reconnectEvents[1] as BaseEvent & {
+      threadId?: string;
+      runId?: string;
+    };
+    expect(terminal.threadId).toBe('thread-7');
+    // The real AG-UI runId the client used for this run ('run-1', passed to
+    // `buildInput` above) -- not the store's own internal `run.id` (a
+    // UUID unrelated to the AG-UI protocol) -- so a client correlating a
+    // replayed terminal event against the runId it saw live is not left
+    // mismatched.
+    expect(terminal.runId).toBe('run-1');
+  });
+
+  it("recovers each historic run's own real AG-UI runId on reconnect, never the store's internal run id or another run's", async () => {
+    const { store } = fixtureStore();
+    const runner = new ConversationRunner(store, 'owner-1');
+
+    await collect(
+      runner.run({
+        threadId: 'thread-multi-run',
+        agent: new EchoAgent('dot-1', 'first'),
+        input: buildInput('thread-multi-run', 'client-run-alpha', [
+          userMessage('u1', 'one'),
+        ]),
+      }),
+    ).done;
+    const afterFirst = store
+      .messages('thread-multi-run')
+      .map((m) => m.content as Message);
+    await collect(
+      runner.run({
+        threadId: 'thread-multi-run',
+        agent: new EchoAgent('dot-1', 'second'),
+        input: buildInput('thread-multi-run', 'client-run-beta', [
+          ...afterFirst,
+          userMessage('u2', 'two'),
+        ]),
+      }),
+    ).done;
+
+    const events: BaseEvent[] = [];
+    runner
+      .connect({ threadId: 'thread-multi-run' })
+      .subscribe((event) => events.push(event));
+    await flush();
+    const terminals = events.filter(
+      (event) => event.type === EventType.RUN_FINISHED,
+    ) as (BaseEvent & { runId?: string })[];
+    expect(terminals.map((event) => event.runId)).toEqual([
+      'client-run-alpha',
+      'client-run-beta',
+    ]);
+    const storeRunIds = store.runs('thread-multi-run').map((run) => run.id);
+    expect(terminals.map((event) => event.runId)).not.toEqual(storeRunIds);
   });
 });
 
