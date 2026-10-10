@@ -18,7 +18,10 @@ import {
 } from './platform-config.js';
 import { validateRuntimeScope } from './runtime-scope.js';
 import { ConversationRunner } from './conversation-runner.js';
-import { ConversationStore } from './conversation-store.js';
+import {
+  ConversationStore,
+  type ServerTurnSource,
+} from './conversation-store.js';
 import { SetupTelemetry } from './setup-telemetry.js';
 export class Platform {
   readonly setupTelemetry: SetupTelemetry;
@@ -184,6 +187,7 @@ export class Platform {
     threadId: string,
     prompt: string,
     signal: AbortSignal,
+    source: ServerTurnSource,
     metadata?: Record<string, unknown>,
   ): Promise<string> {
     this.requireReady();
@@ -194,6 +198,7 @@ export class Platform {
       threadId,
       prompt,
       AbortSignal.any([signal, this.shutdown.signal]),
+      source,
       metadata,
     );
     this.turns.add(turn);

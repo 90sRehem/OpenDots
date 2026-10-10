@@ -87,6 +87,7 @@ it('binds voice history and compute to the existing thread, deduplicates tools a
     'thread',
     expect.stringContaining('Record a short call receipt'),
     expect.any(AbortSignal),
+    'voice_receipt',
     { opendotsSource: 'voice_receipt' },
   );
   await expect(f.voice.compute(call.id, 'late', 'Research')).rejects.toThrow(

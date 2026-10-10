@@ -281,6 +281,7 @@ it('sends a single owner resend notice for an interrupted run, including across 
   const dot = f.workspace.dots()[0];
   f.workspace.bindThread('telegram-2002', dot.id, 'Telegram conversation');
   f.store.admitTurn({
+    source: 'channel_owner',
     threadId: 'telegram-2002',
     dotId: dot.id,
     ownerId: f.workspace.ownerId,

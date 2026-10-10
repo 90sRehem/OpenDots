@@ -87,6 +87,10 @@ export interface Dot {
   createdAt: number;
   learningContainerId?: string | null;
   skillDeliveryEnabled?: boolean;
+  /** Local collection opt-in; copied into a conversation only when it is created. */
+  learningEnabled?: boolean;
+  /** Bumped on collection, delivery, or permission changes that must revoke in-flight use. */
+  learningRevision?: number;
 }
 export interface Conversation {
   id: string;
@@ -96,6 +100,8 @@ export interface Conversation {
   createdAt: number;
   /** Frozen at creation; null means this conversation does not participate. */
   learningContainerId?: string | null;
+  /** Frozen at creation from the Dot's collection opt-in; legacy threads stay false. */
+  localLearningEnrolled?: boolean;
 }
 export interface CallReceipt {
   anchorMessageId?: string | null;

@@ -29,6 +29,7 @@ describe('conversation admission', () => {
   it('admits a turn with the message and its run committed together (:memory:)', () => {
     const { store } = fixture();
     const { message, run } = store.admitTurn({
+      source: 'web_owner',
       threadId: 'thread-1',
       dotId: 'dot-1',
       ownerId: 'owner-1',
@@ -45,6 +46,7 @@ describe('conversation admission', () => {
   it('assigns increasing ordinals per thread as messages are appended', () => {
     const { store } = fixture();
     store.admitTurn({
+      source: 'web_owner',
       threadId: 'thread-1',
       dotId: 'dot-1',
       ownerId: 'owner-1',
@@ -72,7 +74,11 @@ describe('conversation admission', () => {
         role: 'user';
         content: unknown;
       }) => unknown;
-      insertRun: (threadId: string) => { id: string };
+      insertRun: (
+        threadId: string,
+        source: 'web_owner',
+        ordinal: number,
+      ) => { id: string };
       insertEvent: (
         threadId: string,
         runId: string,
@@ -88,7 +94,7 @@ describe('conversation admission', () => {
           role: 'user',
           content: { text: 'doomed' },
         });
-        const run = privateStore.insertRun('thread-1');
+        const run = privateStore.insertRun('thread-1', 'web_owner', 0);
         privateStore.insertEvent('thread-1', run.id, { type: 'RUN_STARTED' });
         throw new Error('simulated failure mid-turn');
       }),
@@ -102,6 +108,7 @@ describe('run terminal transitions', () => {
   it('refuses to finish an already-terminal run and does not append a duplicate event', () => {
     const { store } = fixture();
     const { run } = store.admitTurn({
+      source: 'web_owner',
       threadId: 'thread-1',
       dotId: 'dot-1',
       ownerId: 'owner-1',
@@ -124,6 +131,7 @@ describe('restart durability', () => {
   it('reads a thread back in ordinal order with no message loss after closing and reopening the handle', () => {
     const { store, path } = fixture(true);
     const { run } = store.admitTurn({
+      source: 'web_owner',
       threadId: 'thread-1',
       dotId: 'dot-1',
       ownerId: 'owner-1',
@@ -169,6 +177,7 @@ describe('connector_inbound uniqueness', () => {
       ownerId: 'owner-1',
       role: 'user' as const,
       content: { id: 'message-1', role: 'user', content: 'hello' },
+      source: 'channel_owner' as const,
     };
     const admitted = store.admitInboundTurn(params);
     expect(admitted).not.toBeNull();

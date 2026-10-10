@@ -164,6 +164,7 @@ export class TelegramChannel {
       role: 'user',
       content: userMessage,
       metadata: { platform: PLATFORM, chatId: message.chat.id },
+      source: 'channel_owner',
     });
     if (!admitted) return;
 

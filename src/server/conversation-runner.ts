@@ -15,9 +15,11 @@ import {
 } from '@copilotkit/runtime/v2';
 import {
   ConversationStore,
+  type AdmittedRunSource,
   type ConversationRun,
   type MessageRole,
   type RunStatus,
+  type ServerTurnSource,
 } from './conversation-store.js';
 
 const RESTART_INTERRUPT_REASON =
@@ -79,6 +81,11 @@ interface ActiveRun {
  *  - **Per-thread serialization**: `run()` calls for the same `threadId` are
  *    queued and execute strictly one after another; different threads run
  *    concurrently and independently.
+ *  - **Trusted provenance**: `run()` is the web-owner entry point and admits
+ *    every run as `web_owner`. Server-initiated turns (scheduled tasks, voice)
+ *    enter through `runTurn()` with their own server-chosen source. Neither
+ *    source is read from message or request metadata, so a client cannot
+ *    change which origin a run records.
  *  - **Restart durability, not silent resume**: this process never resumes a
  *    run it did not itself start. The first time any method touches a
  *    thread, any `runs` row still `running` that this process is not itself
@@ -98,7 +105,23 @@ export class ConversationRunner extends AgentRunner {
     super();
   }
 
+  /** Web-owner entry point (the CopilotRuntime handler, behind the owner token). */
   run(request: AgentRunnerRunRequest): Observable<BaseEvent> {
+    return this.start(request, 'web_owner');
+  }
+
+  /** Server-initiated turn; never admitted as owner web evidence. */
+  runTurn(
+    request: AgentRunnerRunRequest,
+    source: ServerTurnSource,
+  ): Observable<BaseEvent> {
+    return this.start(request, source);
+  }
+
+  private start(
+    request: AgentRunnerRunRequest,
+    source: AdmittedRunSource,
+  ): Observable<BaseEvent> {
     const subject = new ReplaySubject<BaseEvent>(Infinity);
     // Queuing happens outside the returned Observable on purpose: unlike a
     // request-scoped execution, this run must keep going even if the
@@ -108,7 +131,7 @@ export class ConversationRunner extends AgentRunner {
     // `executeRun` rejects before reaching its own try/finally (a store read
     // or write in its prologue), so a caller never gets a hung stream.
     void this.enqueue(request.threadId, () =>
-      this.executeRun(request, subject),
+      this.executeRun(request, subject, source),
     ).catch((error) => {
       subject.next({
         type: EventType.RUN_ERROR,
@@ -293,6 +316,7 @@ export class ConversationRunner extends AgentRunner {
   private async executeRun(
     request: AgentRunnerRunRequest,
     subject: ReplaySubject<BaseEvent>,
+    source: AdmittedRunSource,
   ): Promise<void> {
     this.reconcileThread(request.threadId);
     const threadId = request.threadId;
@@ -338,8 +362,9 @@ export class ConversationRunner extends AgentRunner {
           content: message,
           toolCallId: message.role === 'tool' ? message.toolCallId : null,
         };
-        if (!admittedRun) admittedRun = this.store.admitTurn(params).run;
-        else this.store.appendMessage(params);
+        if (!admittedRun)
+          admittedRun = this.store.admitTurn({ ...params, source }).run;
+        else this.store.appendMessage({ ...params, runId: admittedRun.id });
       }
       // Durably record the real AG-UI `runId` this run started with, under
       // the store's own `run.id`, so a later `connect()` -- even after this
@@ -455,6 +480,7 @@ export class ConversationRunner extends AgentRunner {
           role: message.role === 'tool' ? 'tool' : 'assistant',
           content: message,
           toolCallId: message.role === 'tool' ? message.toolCallId : null,
+          runId: run.id,
         });
       }
       const status = active.stopRequested

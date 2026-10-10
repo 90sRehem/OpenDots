@@ -162,6 +162,7 @@ it('gives a scheduled task and a web-chat message one canonical thread that both
     workspace.taskThread('task-1')!,
     'Check the report',
     new AbortController().signal,
+    'scheduled_task',
     { opendotsSource: 'scheduled_task' },
   );
   expect(reply).toBe('Answer to: Check the report');
@@ -207,6 +208,7 @@ it('saves a page conversation from the same committed transcript used by direct 
       thread.id,
       'Page question',
       new AbortController().signal,
+      'voice_compute',
     ),
   ).toBe('Answer to: Page question');
   expect(workspace.conversations()).toHaveLength(1);
@@ -231,6 +233,7 @@ it('runs voice compute and the call receipt on the existing thread, and drops a 
     thread.id,
     'Earlier question',
     new AbortController().signal,
+    'voice_compute',
   );
 
   const transport = vi.fn<typeof fetch>(async (url) =>
@@ -290,6 +293,7 @@ it('records a turn in progress at shutdown as interrupted and never resumes it o
     thread.id,
     'Long scheduled task',
     new AbortController().signal,
+    'scheduled_task',
     { opendotsSource: 'scheduled_task' },
   );
   const outcome = turn.then(
@@ -315,6 +319,7 @@ it('records a turn in progress at shutdown as interrupted and never resumes it o
       thread.id,
       'Next question',
       new AbortController().signal,
+      'voice_compute',
     ),
   ).toBe('Answer to: Next question');
   expect(modelRuns).toBe(2);
@@ -332,6 +337,7 @@ it('marks work left open by a crashed process interrupted at startup and never r
   const call = first.workspace.createCall(thread.id);
   first.workspace.setCall(call.id, 'active', '');
   first.conversationStore.admitTurn({
+    source: 'web_owner',
     threadId: thread.id,
     dotId: dot.id,
     ownerId: 'owner',
@@ -361,6 +367,7 @@ it('marks work left open by a crashed process interrupted at startup and never r
       thread.id,
       'Fresh question',
       new AbortController().signal,
+      'voice_compute',
     ),
   ).toBe('Answer to: Fresh question');
   expect(modelRuns).toBe(1);
