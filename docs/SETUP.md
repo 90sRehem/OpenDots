@@ -221,11 +221,20 @@ Automatic extraction is optional. Set `LEARNING_EXTRACTOR_URL` to an
 OpenAI-compatible endpoint on `http://127.0.0.1` or `http://[::1]` (no URL
 credentials, no redirects) and `LEARNING_EXTRACTOR_MODEL` to the model it
 serves. OpenDots makes at most one tool-free call at a time, only when no
-foreground turn is running. The owner's pause cancels a running extraction, and revoked
-learning or memory permission cancels it and any queued work. Extraction never
-falls back to `OPENAI_BASE_URL`. Without a usable endpoint, extraction is shown
-as unavailable and manual authoring still works. An extracted lesson is only ever
-a pending or quarantined proposal, and it cannot activate without review.
+foreground turn is running. The owner's pause cancels a running extraction, and
+revoked learning or memory permission cancels it and any queued work. Extraction
+never falls back to `OPENAI_BASE_URL`. Without a usable endpoint, extraction is
+shown as unavailable and manual authoring still works. An extracted lesson is
+only ever a pending or quarantined proposal, and it cannot activate without
+review.
+
+The endpoint must be loopback, so a containerized server can only reach an
+extractor that shares its network namespace, such as one running in the same
+container or one reached through host networking. An extractor listening on
+`127.0.0.1` on the Docker host is not reachable from inside the `app` container,
+and a different container IP is refused because it is not loopback. The bundled
+compose file forwards `LEARNING_EXTRACTOR_URL` and `LEARNING_EXTRACTOR_MODEL`
+from `.env` when they are set.
 
 ## Development checks
 
