@@ -202,6 +202,7 @@ export class TelegramChannel {
           role: 'assistant',
           content: { id: randomUUID(), role: 'assistant', content: reply },
           metadata: { platform: PLATFORM },
+          runId: admitted.run.id,
         });
       }
       this.store.finishRun(

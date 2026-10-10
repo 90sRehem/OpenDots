@@ -163,6 +163,10 @@ it('admits an allow-listed private message, runs the agent, and replies in the s
     'user',
     'assistant',
   ]);
+  const messages = f.store.messages('telegram-2002');
+  const channelRun = f.store.runs('telegram-2002')[0];
+  expect(channelRun.firstOrdinal).toBe(messages[0].ordinal);
+  expect(channelRun.lastOrdinal).toBe(messages[1].ordinal);
   expect(f.store.runs('telegram-2002').map((run) => run.status)).toEqual([
     'completed',
   ]);
