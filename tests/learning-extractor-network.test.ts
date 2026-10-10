@@ -91,9 +91,7 @@ describe('pinned loopback transport', () => {
     expect(reply.text.length).toBeLessThanOrEqual(
       LEARNING_EXTRACTION.outputChars,
     );
-    expect(() => parseExtractionReply(reply.text)).toThrow(
-      'malformed_output',
-    );
+    expect(() => parseExtractionReply(reply.text)).toThrow('malformed_output');
   });
 
   it('reports missing usage as null, not as zero', async () => {
