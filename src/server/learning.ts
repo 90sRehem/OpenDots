@@ -9,16 +9,21 @@ import type { LearningReviewToken } from '../shared/learning.js';
 import type { Dot } from '../shared/types.js';
 import type {
   ConversationMessage,
+  ConversationRun,
   ConversationStore,
+  DigestedMessage,
   LearningClaimLimits,
   LearningConsent,
   LearningJob,
+  LearningJobCandidate,
 } from './conversation-store.js';
 import {
   canonicalJson,
   learningEvidenceHash,
   learningPayloadHash,
   learningPayloadSchema,
+  sha256Hex,
+  type LearningEvidenceRecord,
   type LearningPayload,
   type LearningSkill,
   type LearningVersion,
@@ -1242,4 +1247,232 @@ export async function runLearningExtraction(
     clearTimeout(timer);
     signal.removeEventListener('abort', relay);
   }
+}
+
+// Automatic signal capture (design report section 4.3 step 1). Detection is a
+// deterministic read of committed canonical rows: no model, no embeddings, no
+// network. It never decides truth or intent. It only proposes that one run is
+// worth one extraction.
+
+/** Fixed v1 signal bounds. */
+export const LEARNING_SIGNAL_LIMITS = {
+  /** Owner messages cited by one correction; the oldest cued messages win. */
+  correctionEvidence: 3,
+  /** Shortest ordered tool-name pattern that can count as a workflow. */
+  patternMinCalls: 3,
+  patternWindowMs: 7 * 24 * 60 * 60 * 1000,
+  /** Eligible runs compared for one candidate, the candidate run included. */
+  patternComparedRuns: 20,
+} as const;
+
+/**
+ * Correction cues, PT and EN, matched after accents, case, and hyphens are
+ * folded. They are a cheap recall heuristic: a cue means "look at this run",
+ * never "this is a correction". None contains a regular-expression metacharacter.
+ */
+const CORRECTION_CUES = [
+  'nao faca',
+  'nao use',
+  'nao quero',
+  'nao deve',
+  'prefiro',
+  'em vez de',
+  'ao inves de',
+  'da proxima vez',
+  'daqui pra frente',
+  'daqui para frente',
+  'a partir de agora',
+  'lembre disso',
+  'lembra disso',
+  'lembre se',
+  'instead',
+  'remember this',
+  'remember that',
+  "don't do",
+  'do not do',
+  'never do',
+  'from now on',
+  'next time',
+  'i prefer',
+  'prefer',
+];
+const CORRECTION_CUE = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:${CORRECTION_CUES.join('|')})(?![\\p{L}\\p{N}])`,
+  'u',
+);
+
+/** Lowercase, accent-free text with one apostrophe form and single spaces, so cues match alike in PT and EN. */
+function foldCueText(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/\p{M}+/gu, '')
+    .toLowerCase()
+    .replace(/[‘’`]/g, "'")
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function citeDigested(
+  item: DigestedMessage,
+  run: ConversationRun,
+  signal: LearningEvidenceRecord['signal'],
+): LearningEvidenceRecord {
+  return {
+    threadId: run.threadId,
+    runId: run.id,
+    messageId: item.message.id,
+    ordinal: item.message.ordinal,
+    role: item.message.role as LearningEvidenceRecord['role'],
+    sha256: item.sha256,
+    signal,
+  };
+}
+
+/**
+ * The job candidate for one signal. Its source digest binds the evidence,
+ * which carries each cited message's content digest, and the extractor prompt
+ * version. The worker's bounded input is built from the same messages.
+ */
+function candidateFor(
+  signal: LearningJobCandidate['signal'],
+  evidence: LearningEvidenceRecord[],
+  patternHash: string | null,
+): LearningJobCandidate {
+  return {
+    signal,
+    evidence,
+    sourceDigest: sha256Hex(
+      canonicalJson({
+        promptVersion: LEARNING_EXTRACTOR_PROMPT_VERSION,
+        signal,
+        evidence,
+      }),
+    ),
+    patternHash,
+  };
+}
+
+/** Ordered tool names an assistant message in these bounds called. Arguments are never read. */
+function toolNamesOf(items: DigestedMessage[]): string[] {
+  return items
+    .filter(({ message }) => message.role === 'assistant')
+    .flatMap(({ message }) =>
+      assistantCalls(message).map((call) => call.function.name),
+    );
+}
+
+/** The pattern digest: each tool name hashed, then the ordered sequence hashed. Names never leave the server in clear. */
+function toolPatternHash(names: string[]): string {
+  return sha256Hex(canonicalJson(names.map((name) => sha256Hex(name))));
+}
+
+/**
+ * The one candidate, if any, that enqueues extraction for this run. Called only
+ * from the trusted completion seam, and only for a completed run. A correction
+ * outranks a repeated workflow, so one run yields at most one candidate. Every
+ * read is bounded: at most one run's bounds plus twenty runs for the pattern.
+ */
+export function detectLearningCandidate(
+  conversations: ConversationStore,
+  run: ConversationRun,
+  now = Date.now(),
+): LearningJobCandidate | null {
+  if (
+    run.source !== 'web_owner' ||
+    run.firstOrdinal === null ||
+    run.lastOrdinal === null
+  )
+    return null;
+  const consent = conversations.learningConsent(run.threadId);
+  if (
+    !consent ||
+    !consent.enrolled ||
+    !consent.learningEnabled ||
+    !consent.memoryAllowed
+  )
+    return null;
+  const items = conversations.boundedMessageDigests(
+    run.threadId,
+    run.firstOrdinal,
+    run.lastOrdinal,
+    ['user', 'assistant'],
+  );
+  return (
+    correctionCandidate(run, items) ??
+    repeatedWorkflowCandidate(conversations, run, consent, items, now)
+  );
+}
+
+/** Direct owner text only: a cue in assistant or tool text never counts. */
+function correctionCandidate(
+  run: ConversationRun,
+  items: DigestedMessage[],
+): LearningJobCandidate | null {
+  const cued = items
+    .filter(
+      ({ message }) =>
+        message.role === 'user' &&
+        CORRECTION_CUE.test(foldCueText(textOf(message))),
+    )
+    .slice(0, LEARNING_SIGNAL_LIMITS.correctionEvidence);
+  if (!cued.length) return null;
+  return candidateFor(
+    'correction',
+    cued.map((item) => citeDigested(item, run, 'correction')),
+    null,
+  );
+}
+
+/**
+ * Two eligible runs of the same Dot within the window, each with the same
+ * ordered tool-name pattern of at least three calls. Only the run that just
+ * completed (the newest) is enqueued, and it cites one tool-call message from
+ * each of the two runs.
+ */
+function repeatedWorkflowCandidate(
+  conversations: ConversationStore,
+  run: ConversationRun,
+  consent: LearningConsent,
+  items: DigestedMessage[],
+  now: number,
+): LearningJobCandidate | null {
+  if (!items.some(({ message }) => message.role === 'user')) return null;
+  const names = toolNamesOf(items);
+  if (names.length < LEARNING_SIGNAL_LIMITS.patternMinCalls) return null;
+  const pattern = toolPatternHash(names);
+  const earlier = conversations.learningRunsForDot(
+    consent.ownerId,
+    consent.dotId,
+    now - LEARNING_SIGNAL_LIMITS.patternWindowMs,
+    LEARNING_SIGNAL_LIMITS.patternComparedRuns - 1,
+    run.id,
+  );
+  for (const other of earlier) {
+    if (other.firstOrdinal === null || other.lastOrdinal === null) continue;
+    const otherItems = conversations.boundedMessageDigests(
+      other.threadId,
+      other.firstOrdinal,
+      other.lastOrdinal,
+      ['user', 'assistant'],
+    );
+    if (!otherItems.some(({ message }) => message.role === 'user')) continue;
+    if (toolPatternHash(toolNamesOf(otherItems)) !== pattern) continue;
+    const here = items.find(
+      ({ message }) => assistantCalls(message).length > 0,
+    );
+    const there = otherItems.find(
+      ({ message }) => assistantCalls(message).length > 0,
+    );
+    if (!here || !there) continue;
+    return candidateFor(
+      'repeated_workflow',
+      [
+        citeDigested(here, run, 'repeated_workflow'),
+        citeDigested(there, other, 'repeated_workflow'),
+      ],
+      pattern,
+    );
+  }
+  return null;
 }

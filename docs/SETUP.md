@@ -225,6 +225,18 @@ revision. In-flight snapshots stop loading, and a revoked learned body is
 replaced with a marker before it can reach the model again, so it cannot be
 replayed. Uncheck **Use approved lessons** to continue without skills.
 
+Two automatic signals queue an extraction, and only for a completed web-owner
+turn that has a direct owner message, on a thread enrolled for learning while
+the Dot still allows learning. A correction cue in your own message, such as
+"não faça", "prefiro", "instead", or "remember this", queues one extraction for
+that turn. A repeated workflow queues the newest turn when it and another
+eligible turn of the same Dot in the last seven days call the same tools in the
+same order, at least three calls, comparing up to the 20 most recent eligible
+turns. Only hashed tool names are compared, and tool
+arguments are never read. Cues are a cheap recall heuristic, not a judgement of
+what you meant. Channel, voice, scheduled, failed, and interrupted turns never
+queue one, and a failed signal check never fails the chat.
+
 Automatic extraction is optional. Set `LEARNING_EXTRACTOR_URL` to an
 OpenAI-compatible endpoint on `http://127.0.0.1` or `http://[::1]` (no URL
 credentials, no redirects) and `LEARNING_EXTRACTOR_MODEL` to the model it

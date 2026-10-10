@@ -12,6 +12,7 @@ import {
   LEARNING_LIMITS,
   LEARNING_SIGNALS,
   pruneLearning,
+  sha256Hex,
   type LearningEvidenceRecord,
   type LearningSignal,
 } from './workspace.js';
@@ -64,6 +65,13 @@ export interface LearningJobCandidate {
   signal: LearningSignal;
   evidence: LearningEvidenceRecord[];
   sourceDigest: string;
+  /** Required for `repeated_workflow` and absent for every other signal. */
+  patternHash?: string | null;
+}
+/** A canonical message with the digest of its stored content, which evidence records cite. */
+export interface DigestedMessage {
+  message: ConversationMessage;
+  sha256: string;
 }
 export type LearningJobSkip =
   | 'run_not_completed'
@@ -149,6 +157,10 @@ const learningJobCandidateSchema = z
       .min(1)
       .max(LEARNING_LIMITS.evidenceRecords),
     sourceDigest: z.string().regex(/^[0-9a-f]{64}$/),
+    patternHash: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .nullish(),
   })
   .strict();
 export interface AgUiEvent {
@@ -516,6 +528,12 @@ export class ConversationStore {
     if (status !== 'completed') return skipped('run_not_completed');
     const parsed = learningJobCandidateSchema.safeParse(candidate);
     if (!parsed.success) return skipped('invalid_candidate');
+    // The pattern digest belongs to the repeated-workflow signal and no other.
+    if (
+      (parsed.data.signal === 'repeated_workflow') !==
+      !!parsed.data.patternHash
+    )
+      return skipped('invalid_candidate');
     if (run.source !== 'web_owner') return skipped('source_not_eligible');
     if (run.firstOrdinal === null || run.lastOrdinal === null)
       return skipped('unbounded_run');
@@ -601,7 +619,7 @@ export class ConversationStore {
       state: 'queued',
       evidence: candidate.evidence,
       sourceDigest: candidate.sourceDigest,
-      patternHash: null,
+      patternHash: candidate.patternHash ?? null,
       consentRevision: Number(thread.learningRevision),
       lease: null,
       startedAt: null,
@@ -616,7 +634,7 @@ export class ConversationStore {
     this.db
       .prepare(
         `INSERT INTO learning_jobs (id, ownerId, dotId, threadId, sourceRunId, signal, state, evidence, sourceDigest, patternHash, consentRevision, lease, startedAt, finishedAt, reservedInputTokens, reservedOutputTokens, inputTokens, outputTokens, errorCode, createdAt)
-         VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, NULL, ?, NULL, NULL, NULL, 0, 0, NULL, NULL, NULL, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, NULL, NULL, NULL, 0, 0, NULL, NULL, NULL, ?)`,
       )
       .run(
         job.id,
@@ -627,6 +645,7 @@ export class ConversationStore {
         job.signal,
         evidence,
         job.sourceDigest,
+        job.patternHash,
         job.consentRevision,
         job.createdAt,
       );
@@ -702,6 +721,62 @@ export class ConversationStore {
         )
         .all(threadId, firstOrdinal, lastOrdinal) as unknown as MessageRow[]
     ).map(toMessage);
+  }
+  /**
+   * Canonical messages of one run's ordinal bounds, restricted to `roles`, each
+   * with the digest of its stored content. Signal detection reads only these.
+   */
+  boundedMessageDigests(
+    threadId: string,
+    firstOrdinal: number,
+    lastOrdinal: number,
+    roles: readonly MessageRole[],
+  ): DigestedMessage[] {
+    const placeholders = roles.map(() => '?').join(', ');
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM messages WHERE threadId=? AND ordinal BETWEEN ? AND ? AND role IN (${placeholders}) ORDER BY ordinal`,
+        )
+        .all(
+          threadId,
+          firstOrdinal,
+          lastOrdinal,
+          ...roles,
+        ) as unknown as MessageRow[]
+    ).map((row) => ({
+      message: toMessage(row),
+      sha256: sha256Hex(row.content),
+    }));
+  }
+  /**
+   * The most recent learning-eligible runs of one Dot, newest first: web-owner,
+   * completed, bounded, on threads enrolled for local learning. `excludeRunId`
+   * is the run being evaluated, which is never compared with itself.
+   */
+  learningRunsForDot(
+    ownerId: string,
+    dotId: string,
+    since: number,
+    limit: number,
+    excludeRunId: string,
+  ): ConversationRun[] {
+    return this.db
+      .prepare(
+        `SELECT r.* FROM conversation_runs r JOIN thread_bindings tb ON tb.id = r.threadId
+         WHERE tb.ownerId=? AND tb.dotId=? AND tb.localLearningEnrolled=1
+           AND r.source='web_owner' AND r.status='completed'
+           AND r.firstOrdinal IS NOT NULL AND r.lastOrdinal IS NOT NULL
+           AND r.startedAt>=? AND r.id<>?
+         ORDER BY r.startedAt DESC, r.rowid DESC LIMIT ?`,
+      )
+      .all(
+        ownerId,
+        dotId,
+        since,
+        excludeRunId,
+        limit,
+      ) as unknown as ConversationRun[];
   }
   /**
    * Moves one queued job to running under a new lease. The budget counts and the
