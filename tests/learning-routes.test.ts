@@ -130,6 +130,19 @@ async function activate(
   return (await approved.json()) as LearningVersionView;
 }
 
+/** Every stored version across all skills, for count and state assertions. */
+async function versionsOf(
+  app: ReturnType<typeof fixture>['app'],
+  dotId: string,
+) {
+  const listed = await (
+    await app.request(`/api/dots/${dotId}/learning`)
+  ).json();
+  return (listed.skills as { versions: LearningVersionView[] }[]).flatMap(
+    (skill) => skill.versions,
+  );
+}
+
 describe('owner learning routes: lifecycle', () => {
   it('lists skills, reports extraction as unavailable, and records a proposal as pending', async () => {
     const { app, dotId } = fixture();
@@ -257,6 +270,88 @@ describe('owner learning routes: lifecycle', () => {
       }),
     );
     expect(renamed.status).toBe(400);
+  });
+
+  it('refuses an edit with a hard scanner finding and stores nothing', async () => {
+    const { app, dotId } = fixture();
+    const base = await propose(app, dotId, 'review-evidence');
+    const read = await detail(app, dotId, base.id);
+    const before = (await versionsOf(app, dotId)).length;
+    const refused = await app.request(
+      `/api/dots/${dotId}/learning/versions/${base.id}/edit`,
+      json({
+        review: read.review,
+        payload: {
+          ...payloadFor('review-evidence'),
+          verification: 'Check <b>two</b> sources.',
+        },
+      }),
+    );
+    expect(refused.status).toBe(400);
+    const body = (await refused.json()) as {
+      error: string;
+      findings: { code: string; explanation: string }[];
+    };
+    expect(body.findings.map((finding) => finding.code)).toContain('markup');
+    expect(body.error).toContain('Markup is not allowed');
+    expect((await versionsOf(app, dotId)).length).toBe(before);
+  });
+
+  it('stores an edit with a soft finding as quarantined and refuses approval', async () => {
+    const { app, dotId } = fixture();
+    const base = await propose(app, dotId, 'review-evidence');
+    const read = await detail(app, dotId, base.id);
+    const response = await app.request(
+      `/api/dots/${dotId}/learning/versions/${base.id}/edit`,
+      json({
+        review: read.review,
+        payload: {
+          ...payloadFor('review-evidence'),
+          description: 'Read https://example.com/source before a claim.',
+        },
+      }),
+    );
+    expect(response.status).toBe(201);
+    const quarantined = (await response.json()) as LearningVersionView;
+    expect(quarantined).toMatchObject({
+      state: 'quarantined',
+      safetyScanned: true,
+    });
+    expect(quarantined.safetyFindings.map((finding) => finding.code)).toContain(
+      'link',
+    );
+    const fresh = await detail(app, dotId, quarantined.id);
+    const approved = await review(
+      app,
+      dotId,
+      quarantined.id,
+      'approve',
+      fresh.review,
+    );
+    expect(approved.status).toBe(409);
+    expect(await approved.json()).toMatchObject({ code: 'state' });
+  });
+
+  it('keeps a clean edit pending and records that the scan ran', async () => {
+    const { app, dotId } = fixture();
+    const base = await propose(app, dotId, 'review-evidence');
+    const read = await detail(app, dotId, base.id);
+    const response = await app.request(
+      `/api/dots/${dotId}/learning/versions/${base.id}/edit`,
+      json({
+        review: read.review,
+        payload: {
+          ...payloadFor('review-evidence'),
+          verification: 'Check two sources.',
+        },
+      }),
+    );
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      state: 'pending',
+      safetyScanned: true,
+      safetyFindings: [],
+    });
   });
 
   it('retires the active version at once, and restores it only through a fresh review', async () => {

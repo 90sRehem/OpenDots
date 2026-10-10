@@ -11,6 +11,8 @@ import {
   learningPayloadSchema,
   type LearningPayload,
   type LearningReviewToken,
+  type LearningTurnList,
+  type LearningTurnView,
   type LearningVersionView,
 } from '../shared/learning';
 import type { Dot } from '../shared/types';
@@ -66,7 +68,8 @@ interface DraftFields {
   requiredTools: string;
   notFor: string;
 }
-type Mode = 'view' | 'edit' | 'new';
+/** `turn` writes a lesson drawn from one completed turn the owner chose. */
+type Mode = 'view' | 'edit' | 'new' | 'turn';
 
 const GROUPS: { key: string; title: string; match: (row: Row) => boolean }[] = [
   {
@@ -197,6 +200,9 @@ export function LearningReview({
   const [mode, setMode] = useState<Mode>('view');
   const [confirm, setConfirm] = useState<'reject' | 'retire' | null>(null);
   const [draft, setDraft] = useState<DraftFields>(draftFrom());
+  const [turns, setTurns] = useState<LearningTurnList | null>(null);
+  const [turnsError, setTurnsError] = useState('');
+  const [turn, setTurn] = useState<LearningTurnView | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -208,13 +214,24 @@ export function LearningReview({
     ? 'Conversations for this Dot can use it now.'
     : 'It is active, but delivery is off, so no conversation uses it yet.';
 
+  // Lessons and turns load independently: a failed turn list never hides lessons.
   const loadList = useCallback(async () => {
-    try {
-      setList(await api<LearningList>(`/dots/${dot.id}/learning`));
-      setLoadError('');
-    } catch (error) {
-      setLoadError(messageOf(error));
-    }
+    await Promise.all([
+      api<LearningList>(`/dots/${dot.id}/learning`).then(
+        (lessons) => {
+          setList(lessons);
+          setLoadError('');
+        },
+        (error: unknown) => setLoadError(messageOf(error)),
+      ),
+      api<LearningTurnList>(`/dots/${dot.id}/learning/turns`).then(
+        (turnList) => {
+          setTurns(turnList);
+          setTurnsError('');
+        },
+        (error: unknown) => setTurnsError(messageOf(error)),
+      ),
+    ]);
   }, [dot.id]);
 
   const openVersion = useCallback(
@@ -226,6 +243,7 @@ export function LearningReview({
         setSelectedId(versionId);
         setDetail(next);
         setMode('view');
+        setTurn(null);
         setConfirm(null);
         // A message describes the lesson it was said about; it does not carry over.
         setMessage('');
@@ -300,7 +318,18 @@ export function LearningReview({
     setDetail(null);
     setDraft(draftFrom());
     setConfirm(null);
+    setTurn(null);
     setMode('new');
+    setMessage('');
+  }
+
+  function startTurn(chosen: LearningTurnView) {
+    setSelectedId(null);
+    setDetail(null);
+    setDraft(draftFrom());
+    setConfirm(null);
+    setTurn(chosen);
+    setMode('turn');
     setMessage('');
   }
 
@@ -308,6 +337,7 @@ export function LearningReview({
     if (!detail) return;
     setDraft(draftFrom(detail.version.payload));
     setConfirm(null);
+    setTurn(null);
     setMode('edit');
     setMessage('');
   }
@@ -325,6 +355,13 @@ export function LearningReview({
         `/dots/${dot.id}/learning/proposals`,
         { payload },
         'Saved as a proposal. It is waiting for your review and is not active.',
+      );
+    else if (mode === 'turn' && turn)
+      void act(
+        null,
+        `/dots/${dot.id}/learning/runs/${turn.runId}/proposals`,
+        { payload },
+        'Saved as a proposal from this turn. It is waiting for your review and is not active.',
       );
     else if (detail)
       void act(
@@ -444,14 +481,24 @@ export function LearningReview({
 
         <h5>Evidence</h5>
         {version.evidence.length ? (
-          <ul>
-            {version.evidence.map((record) => (
-              <li key={`${record.runId}-${record.messageId}`}>
-                {record.role} message {record.ordinal}, {record.signal} signal,
-                digest {record.sha256.slice(0, 12)}…
-              </li>
-            ))}
-          </ul>
+          <>
+            {version.evidence.some(
+              (record) => record.signal === 'explicit',
+            ) && (
+              <p className="muted">
+                Marked by you from a completed turn. The turn is cited by
+                digest; its text is not copied into this lesson.
+              </p>
+            )}
+            <ul>
+              {version.evidence.map((record) => (
+                <li key={`${record.runId}-${record.messageId}`}>
+                  {record.role} message {record.ordinal}, {record.signal}{' '}
+                  signal, digest {record.sha256.slice(0, 12)}…
+                </li>
+              ))}
+            </ul>
+          </>
         ) : (
           <p className="muted">
             {version.createdBy === 'owner'
@@ -462,7 +509,7 @@ export function LearningReview({
 
         <h5>Safety</h5>
         <p className="muted">
-          {version.createdBy === 'owner'
+          {!version.safetyScanned
             ? 'Written by you, so no automatic safety check ran on it. Review it as you would any instruction.'
             : version.safetyFindings.length
               ? version.safetyFindings
@@ -589,7 +636,8 @@ export function LearningReview({
   }
 
   function renderForm() {
-    const isNew = mode === 'new';
+    // Every mode but an edit writes a lesson that is not yet stored.
+    const isNew = mode !== 'edit';
     const field = (
       id: keyof DraftFields,
       label: string,
@@ -631,12 +679,27 @@ export function LearningReview({
     return (
       <form className="learning-form" onSubmit={submit}>
         <h4 tabIndex={-1}>
-          {isNew ? 'Write a lesson' : 'Edit as a new proposal'}
+          {mode === 'turn'
+            ? 'Propose a lesson from this turn'
+            : isNew
+              ? 'Write a lesson'
+              : 'Edit as a new proposal'}
         </h4>
+        {mode === 'turn' && turn && (
+          <blockquote className="learning-turn">
+            <p className="muted">
+              From {turn.conversationTitle}, your message on{' '}
+              {new Date(turn.startedAt).toLocaleString()}:
+            </p>
+            <p>{turn.excerpt}</p>
+          </blockquote>
+        )}
         <p className="muted">
-          {isNew
-            ? 'You write this lesson yourself. Nothing is active until you approve it.'
-            : 'Saving creates a new proposal that you must approve. The current text stays as it is until then.'}
+          {mode === 'turn'
+            ? 'You write this lesson yourself, drawing on the turn above. It is saved as a proposal and is not active until you approve it.'
+            : isNew
+              ? 'You write this lesson yourself. Nothing is active until you approve it.'
+              : 'Saving creates a new proposal that you must approve. The current text stays as it is until then.'}
         </p>
         {field(
           'name',
@@ -672,6 +735,7 @@ export function LearningReview({
             disabled={busy}
             onClick={() => {
               setMode('view');
+              setTurn(null);
               setMessage('');
             }}
           >
@@ -780,6 +844,48 @@ export function LearningReview({
               </section>
             );
           })}
+          <section aria-labelledby="learning-turns">
+            <h4 id="learning-turns">Propose from a turn</h4>
+            {!turns && !turnsError && <p className="muted">Loading turns…</p>}
+            {turnsError && (
+              <p className="muted">Could not load turns: {turnsError}</p>
+            )}
+            {turns && turns.turns.length === 0 && (
+              <p className="muted">{turns.reason}</p>
+            )}
+            {turns && turns.turns.length > 0 && (
+              <ul>
+                {turns.turns.map((item) => (
+                  <li key={item.runId} className="learning-turn-item">
+                    <p>
+                      <span>{item.conversationTitle}</span>{' '}
+                      <small className="muted">
+                        {new Date(item.startedAt).toLocaleString()}
+                      </small>
+                    </p>
+                    <p className="muted">{item.excerpt}</p>
+                    {item.marked ? (
+                      <p className="muted">
+                        A lesson was already proposed from this turn.
+                      </p>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={busy || pendingFull}
+                        onClick={() => startTurn(item)}
+                      >
+                        Propose a lesson
+                        <span className="sr-only">
+                          {' '}
+                          from {item.conversationTitle}
+                        </span>
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         </div>
         <div className="learning-detail" aria-live="polite">
           {mode === 'view' && !detail && (
