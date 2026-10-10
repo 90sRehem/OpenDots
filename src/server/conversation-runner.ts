@@ -97,6 +97,7 @@ interface ActiveRun {
 export class ConversationRunner extends AgentRunner {
   private readonly active = new Map<string, ActiveRun>();
   private readonly queues = new Map<string, Promise<unknown>>();
+  private pending = 0;
 
   constructor(
     private readonly store: ConversationStore,
@@ -266,9 +267,17 @@ export class ConversationRunner extends AgentRunner {
     return true;
   }
 
+  /** Runs admitted and not yet finished, queued or executing. Background learning yields to these. */
+  foregroundRuns(): number {
+    return this.pending;
+  }
+
   private enqueue(threadId: string, fn: () => Promise<void>): Promise<void> {
     const prior = this.queues.get(threadId) ?? Promise.resolve();
-    const next = prior.then(fn, fn);
+    this.pending++;
+    const next = prior.then(fn, fn).finally(() => {
+      this.pending--;
+    });
     this.queues.set(
       threadId,
       next.catch(() => undefined),
