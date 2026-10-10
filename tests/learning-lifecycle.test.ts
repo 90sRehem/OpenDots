@@ -426,7 +426,8 @@ describe('review authority and capacity', () => {
     const spaceId = workspace.spaces()[0].id;
     const dots = [dotId];
     const fullDots = Math.ceil(
-      LEARNING_LIMITS.activeSkillsWorkspace / LEARNING_LIMITS.activeSkillsPerDot,
+      LEARNING_LIMITS.activeSkillsWorkspace /
+        LEARNING_LIMITS.activeSkillsPerDot,
     );
     while (dots.length <= fullDots)
       dots.push(
