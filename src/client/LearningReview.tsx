@@ -100,6 +100,14 @@ const FORM_ERROR =
 const messageOf = (error: unknown) =>
   error instanceof Error ? error.message : 'Could not save.';
 
+/** Refusals that a reload of the exact version can resolve; other conflicts cannot. */
+const STALE_REVIEW_CODES = new Set([
+  'stale_content',
+  'stale_evidence',
+  'stale_base',
+  'stale_active',
+]);
+
 const stateText = (row: Row) => {
   if (row.active) return 'Active';
   return (
@@ -263,7 +271,9 @@ export function LearningReview({
         await loadList();
         if (versionId) await openVersion(versionId);
         setMessage(
-          `${messageOf(error)} The lesson has been reloaded; review the current version before deciding.`,
+          STALE_REVIEW_CODES.has(error.code ?? '')
+            ? `${messageOf(error)} The lesson has been reloaded; review the current version before deciding.`
+            : messageOf(error),
         );
       } else setMessage(messageOf(error));
     } finally {

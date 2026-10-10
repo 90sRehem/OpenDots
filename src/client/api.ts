@@ -8,6 +8,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     public status: number,
+    public code?: string,
   ) {
     super(message);
   }
@@ -33,11 +34,13 @@ export async function api<T>(
     .json()
     .catch(() => ({ error: 'Server returned an unreadable response.' }))) as {
     error?: string;
+    code?: string;
   };
   if (!response.ok)
     throw new ApiError(
       data.error ?? `Request failed (${response.status}).`,
       response.status,
+      data.code,
     );
   return data as T;
 }

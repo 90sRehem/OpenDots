@@ -12,12 +12,14 @@ vi.mock('../src/client/api', () => ({
     constructor(
       message: string,
       public status: number,
+      public code?: string,
     ) {
       super(message);
     }
   },
 }));
 import { LearningReview } from '../src/client/LearningReview';
+import { ApiError } from '../src/client/api';
 import type { Dot } from '../src/shared/types';
 
 // Owner review screen: what it shows, which actions a state allows, and that an
@@ -282,6 +284,52 @@ it('states plainly when the Dot is at its proposal limit', async () => {
   const renderer = await render();
   expect(bodyText(renderer)).toContain(
     'Full: this Dot has reached its limit of proposals waiting for review.',
+  );
+});
+
+it('states a capacity refusal plainly without claiming the review is stale', async () => {
+  serve();
+  const renderer = await render();
+  const reads = api.getMockImplementation()!;
+  api.mockClear();
+  api.mockImplementation(async (path: string, method?: string) => {
+    if (path.endsWith('/approve'))
+      throw new ApiError(
+        'This Dot already has its maximum active skills; retire one first.',
+        409,
+        'capacity',
+      );
+    return reads(path, method);
+  });
+  await act(async () => {
+    buttonNamed(renderer, 'Approve and activate').props.onClick();
+  });
+  const text = bodyText(renderer);
+  expect(text).toContain(
+    'This Dot already has its maximum active skills; retire one first.',
+  );
+  expect(text).not.toContain('The lesson has been reloaded');
+});
+
+it('asks the owner to review the reloaded lesson when the review is stale', async () => {
+  serve();
+  const renderer = await render();
+  const reads = api.getMockImplementation()!;
+  api.mockClear();
+  api.mockImplementation(async (path: string, method?: string) => {
+    if (path.endsWith('/approve'))
+      throw new ApiError(
+        'The lesson changed since you reviewed it.',
+        409,
+        'stale_content',
+      );
+    return reads(path, method);
+  });
+  await act(async () => {
+    buttonNamed(renderer, 'Approve and activate').props.onClick();
+  });
+  expect(bodyText(renderer)).toContain(
+    'The lesson changed since you reviewed it. The lesson has been reloaded; review the current version before deciding.',
   );
 });
 
