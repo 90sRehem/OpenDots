@@ -121,6 +121,46 @@ describe('learning storage shape', () => {
     ).toBe(true);
   });
 
+  it('backfills safetyScanned for pre-existing extractor versions on upgrade', () => {
+    const path = learningDatabasePath();
+    const first = openLearningStores(path);
+    const dot = onlyDot(first.workspace);
+    const evidence = citedProposal(first, dot.id, 'backfill');
+    const payload = payloadFor('backfill-check');
+    const owner = first.workspace.proposeLearningVersion({
+      dotId: dot.id,
+      slug: 'backfill-check',
+      payload,
+      evidence: [evidence],
+      state: 'pending',
+      createdBy: 'owner',
+      extractorPromptVersion: 'manual-v1',
+    });
+    const db = rawDatabase(path);
+    db.prepare(
+      `INSERT INTO learning_versions (id, skillId, version, baseVersionId, state, payload, contentHash, evidence, createdBy, jobId, extractorModel, extractorPromptVersion, safetyFindings, safetyScanned, createdAt, reviewedAt, reviewedBy, reviewNote)
+       VALUES ('extractor-version', ?, ?, NULL, 'approved', ?, ?, ?, 'extractor', NULL, 'local', 'extractor-v1', '[]', 1, ?, NULL, NULL, NULL)`,
+    ).run(
+      owner.skillId,
+      owner.version + 1,
+      canonicalJson(payload),
+      sha256(canonicalJson(payload)),
+      canonicalJson([evidence]),
+      Date.now(),
+    );
+    first.conversations.close();
+    first.workspace.close();
+    db.prepare('ALTER TABLE learning_versions DROP COLUMN safetyScanned').run();
+
+    const upgraded = openLearningStores(path);
+    expect(
+      upgraded.workspace.learningVersion('extractor-version')?.safetyScanned,
+    ).toBe(true);
+    expect(upgraded.workspace.learningVersion(owner.id)?.safetyScanned).toBe(
+      false,
+    );
+  });
+
   it('rejects states, signals, and job states outside the approved sets', () => {
     const path = learningDatabasePath();
     const stores = openLearningStores(path);

@@ -224,7 +224,8 @@ export function applyLearningSchema(db: DatabaseSync) {
       .some((field) => field.name === 'safetyScanned')
   )
     db.exec(
-      'ALTER TABLE learning_versions ADD COLUMN safetyScanned INTEGER NOT NULL DEFAULT 0',
+      `ALTER TABLE learning_versions ADD COLUMN safetyScanned INTEGER NOT NULL DEFAULT 0;
+       UPDATE learning_versions SET safetyScanned=1 WHERE createdBy='extractor';`,
     );
 }
 
