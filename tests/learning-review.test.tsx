@@ -320,3 +320,94 @@ it('states that a lesson written by the extractor cites its messages', async () 
   const renderer = await render();
   expect(bodyText(renderer)).toContain('user message 4, correction signal');
 });
+
+it('offers restore for a retired lesson only when no other version is active', async () => {
+  const retired = version({ id: 'v1', version: 1, state: 'retired' });
+  const active = version({ id: 'v2', version: 2, state: 'approved' });
+  const shared = {
+    extraction: { available: false, reason: 'unavailable' },
+    usage,
+    skills: [
+      {
+        id: 's1',
+        slug: 'review-evidence',
+        activeVersionId: 'v2',
+        revision: 1,
+        versions: [retired, active],
+      },
+    ],
+  };
+  api.mockImplementation(async (path: string) => {
+    if (path === '/dots/dot1/learning') return shared;
+    if (path === '/dots/dot1/learning/versions/v1')
+      return {
+        version: retired,
+        replaces: active,
+        skill: {
+          id: 's1',
+          slug: 'review-evidence',
+          activeVersionId: 'v2',
+          revision: 1,
+        },
+        review: {
+          versionId: 'v1',
+          contentHash: HASH,
+          evidenceHash: EVIDENCE_HASH,
+          expectedActiveVersionId: 'v2',
+        },
+      };
+    throw new Error(`unexpected request ${path}`);
+  });
+  let renderer!: ReactTestRenderer;
+  await act(async () => {
+    renderer = create(
+      <LearningReview dot={dot} memoryAllowed onBack={() => {}} />,
+    );
+  });
+  await act(async () => {
+    buttonNamed(renderer, 'v1 · Retired').props.onClick();
+  });
+  expect(buttonsNamed(renderer, 'Restore after review')).toHaveLength(0);
+  expect(bodyText(renderer)).toContain(
+    'Another version of this lesson is active',
+  );
+
+  // Once nothing is active, the same retired lesson can be restored after review.
+  api.mockImplementation(async (path: string) => {
+    if (path === '/dots/dot1/learning')
+      return {
+        ...shared,
+        skills: [
+          { ...shared.skills[0], activeVersionId: null, versions: [retired] },
+        ],
+      };
+    if (path === '/dots/dot1/learning/versions/v1')
+      return {
+        version: retired,
+        replaces: null,
+        skill: {
+          id: 's1',
+          slug: 'review-evidence',
+          activeVersionId: null,
+          revision: 2,
+        },
+        review: {
+          versionId: 'v1',
+          contentHash: HASH,
+          evidenceHash: EVIDENCE_HASH,
+          expectedActiveVersionId: null,
+        },
+      };
+    throw new Error(`unexpected request ${path}`);
+  });
+  let fresh!: ReactTestRenderer;
+  await act(async () => {
+    fresh = create(
+      <LearningReview dot={dot} memoryAllowed onBack={() => {}} />,
+    );
+  });
+  await act(async () => {
+    buttonNamed(fresh, 'v1 · Retired').props.onClick();
+  });
+  expect(buttonsNamed(fresh, 'Restore after review')).toHaveLength(1);
+});

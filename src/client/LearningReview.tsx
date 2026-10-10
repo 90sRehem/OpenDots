@@ -500,7 +500,7 @@ export function LearningReview({
                 : 'Approve and activate'}
             </button>
           )}
-          {state === 'retired' && (
+          {state === 'retired' && detail.skill.activeVersionId === null && (
             <button
               className="primary"
               disabled={busy || workspaceActiveFull || activeFull}
@@ -510,6 +510,14 @@ export function LearningReview({
             >
               Restore after review
             </button>
+          )}
+          {state === 'retired' && detail.skill.activeVersionId !== null && (
+            // The store refuses a restore while another version is active, so the
+            // screen says why instead of offering a button that always fails.
+            <p className="muted">
+              Another version of this lesson is active. Retire it before
+              restoring this one.
+            </p>
           )}
           {active && (
             <button disabled={busy} onClick={() => setConfirm('retire')}>
