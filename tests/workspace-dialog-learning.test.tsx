@@ -43,8 +43,8 @@ const workspace = {
 
 /** The Automatic Learning fieldset, and nothing outside it. */
 function learningFieldset(markup: string) {
-  const start = markup.indexOf('<fieldset');
-  const legendAt = markup.indexOf('Automatic Learning', start);
+  const legendAt = markup.indexOf('Automatic Learning');
+  const start = markup.lastIndexOf('<fieldset', legendAt);
   const end = markup.indexOf('</fieldset>', legendAt);
   if (start < 0 || legendAt < 0 || end < 0)
     throw new Error('Automatic Learning fieldset not rendered.');

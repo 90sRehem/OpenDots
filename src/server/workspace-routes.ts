@@ -168,6 +168,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         data.data.spaceIds,
         data.data.learningContainerId,
         data.data.skillDeliveryEnabled,
+        data.data.learningEnabled,
       ),
       201,
     );

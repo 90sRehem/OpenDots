@@ -382,6 +382,28 @@ describe('owner learning routes: lifecycle', () => {
       ),
     ).toHaveLength(LEARNING_LIMITS.activeSkillsPerDot);
   });
+
+  it('honors the Automatic Learning flag when creating a Dot through the API', async () => {
+    const { app, ws } = fixture();
+    const response = await app.request(
+      '/api/dots',
+      json({
+        spaceId: ws.spaces()[0].id,
+        name: 'Learner',
+        instructions: 'Learn from our work together.',
+        researchAllowed: true,
+        memoryAllowed: true,
+        learningEnabled: true,
+      }),
+    );
+    expect(response.status).toBe(201);
+    const created = (await response.json()) as {
+      id: string;
+      learningEnabled: boolean;
+    };
+    expect(created.learningEnabled).toBe(true);
+    expect(ws.dot(created.id)?.learningEnabled).toBe(true);
+  });
 });
 
 describe('owner learning routes: transport and ownership', () => {
