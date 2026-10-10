@@ -165,6 +165,7 @@ export interface LearningVersionView {
   createdBy: 'extractor' | 'owner';
   extractorPromptVersion: string;
   safetyFindings: SafetyFinding[];
+  safetyScanned: boolean;
   createdAt: number;
   reviewedAt: number | null;
   reviewedBy: string | null;

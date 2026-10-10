@@ -68,6 +68,7 @@ describe('learning storage shape', () => {
       'extractorModel',
       'extractorPromptVersion',
       'safetyFindings',
+      'safetyScanned',
       'createdAt',
       'reviewedAt',
       'reviewedBy',

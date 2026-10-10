@@ -53,6 +53,7 @@ function version(overrides: Record<string, unknown> = {}) {
     createdBy: 'owner',
     extractorPromptVersion: 'owner-v1',
     safetyFindings: [],
+    safetyScanned: true,
     createdAt: 0,
     reviewedAt: null,
     reviewedBy: null,
@@ -96,6 +97,8 @@ function serve(
     usage?: Partial<typeof usage>;
     evidence?: unknown[];
     createdBy?: string;
+    safetyFindings?: unknown[];
+    safetyScanned?: boolean;
     turns?: unknown;
   } = {},
 ) {
@@ -104,6 +107,8 @@ function serve(
     evidence: opts.evidence ?? [],
     createdBy: opts.createdBy ?? 'owner',
     baseVersionId: opts.baseVersionId ?? null,
+    safetyFindings: opts.safetyFindings ?? [],
+    safetyScanned: opts.safetyScanned ?? true,
   });
   const activeVersionId = opts.active ? 'v1' : (opts.activeVersionId ?? null);
   const list = {
@@ -213,6 +218,33 @@ it('shows the exact text, permissions, evidence, and that automatic suggestions 
   expect(text).toContain('Written by you. It cites no conversation messages.');
   expect(text).toContain('Waiting for review. It is not active');
   expect(text).toContain('Nothing is sent to Intelligence');
+});
+
+it('shows the stored safety findings for a scanned owner edit', async () => {
+  serve({
+    safetyScanned: true,
+    safetyFindings: [{ code: 'link', explanation: 'Contains a link.' }],
+  });
+  const renderer = await render();
+  const text = bodyText(renderer);
+  expect(text).toContain('link: Contains a link.');
+  expect(text).not.toContain('no automatic safety check ran');
+});
+
+it('never claims a safety scan for a version the scan did not run on', async () => {
+  serve({ safetyScanned: false });
+  const renderer = await render();
+  const text = bodyText(renderer);
+  expect(text).toContain('no automatic safety check ran');
+  expect(text).not.toContain('The safety check recorded no findings.');
+});
+
+it('records no findings only for a scanned version that had none', async () => {
+  serve({ safetyScanned: true, safetyFindings: [] });
+  const renderer = await render();
+  expect(bodyText(renderer)).toContain(
+    'The safety check recorded no findings.',
+  );
 });
 
 it('approves with the exact token the owner read, and offers approval only for a pending lesson', async () => {

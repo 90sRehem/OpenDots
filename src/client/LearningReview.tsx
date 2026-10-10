@@ -509,7 +509,7 @@ export function LearningReview({
 
         <h5>Safety</h5>
         <p className="muted">
-          {version.createdBy === 'owner' && version.evidence.length === 0
+          {!version.safetyScanned
             ? 'Written by you, so no automatic safety check ran on it. Review it as you would any instruction.'
             : version.safetyFindings.length
               ? version.safetyFindings

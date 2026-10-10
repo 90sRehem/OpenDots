@@ -73,6 +73,7 @@ function learningVersionView(
     createdBy: version.createdBy,
     extractorPromptVersion: version.extractorPromptVersion,
     safetyFindings: version.safetyFindings,
+    safetyScanned: version.safetyScanned,
     createdAt: version.createdAt,
     reviewedAt: version.reviewedAt,
     reviewedBy: version.reviewedBy,
@@ -346,11 +347,26 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         },
         400,
       );
+    const scan = scanLearningPayload(parsed.data.payload);
+    // Hard findings block storage. Soft findings store the edit quarantined, which
+    // cannot be approved until the owner edits it into a new proposal.
+    if (scan.hard.length)
+      return c.json(
+        {
+          error: `This edit was not saved. ${scan.hard.map((finding) => finding.explanation).join(' ')}`,
+          findings: scan.hard,
+        },
+        400,
+      );
     try {
       const edited = platform.workspace.proposeLearningEdit(
         dot.id,
         parsed.data.review,
         parsed.data.payload,
+        {
+          safetyFindings: scan.soft,
+          state: scan.soft.length ? 'quarantined' : 'pending',
+        },
       );
       return c.json(learningVersionView(edited, found.skill.slug), 201);
     } catch (error) {

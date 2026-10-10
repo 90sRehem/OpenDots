@@ -167,6 +167,7 @@ export function applyLearningSchema(db: DatabaseSync) {
       extractorModel TEXT NULL,
       extractorPromptVersion TEXT NOT NULL,
       safetyFindings TEXT NOT NULL CHECK (json_valid(safetyFindings)),
+      safetyScanned INTEGER NOT NULL DEFAULT 0,
       createdAt INTEGER NOT NULL,
       reviewedAt INTEGER NULL,
       reviewedBy TEXT NULL,
@@ -216,6 +217,15 @@ export function applyLearningSchema(db: DatabaseSync) {
     BEGIN
       SELECT RAISE(ABORT, 'Learning version provenance is immutable.');
     END;`);
+  if (
+    !db
+      .prepare('PRAGMA table_info(learning_versions)')
+      .all()
+      .some((field) => field.name === 'safetyScanned')
+  )
+    db.exec(
+      'ALTER TABLE learning_versions ADD COLUMN safetyScanned INTEGER NOT NULL DEFAULT 0',
+    );
 }
 
 /**
@@ -371,6 +381,7 @@ export interface LearningVersion {
   extractorModel: string | null;
   extractorPromptVersion: string;
   safetyFindings: SafetyFinding[];
+  safetyScanned: boolean;
   createdAt: number;
   reviewedAt: number | null;
   reviewedBy: string | null;
@@ -378,11 +389,17 @@ export interface LearningVersion {
 }
 type LearningVersionRow = Omit<
   LearningVersion,
-  'payload' | 'evidence' | 'safetyFindings'
-> & { payload: string; evidence: string; safetyFindings: string };
+  'payload' | 'evidence' | 'safetyFindings' | 'safetyScanned'
+> & {
+  payload: string;
+  evidence: string;
+  safetyFindings: string;
+  safetyScanned: number;
+};
 function toLearningVersion(row: LearningVersionRow): LearningVersion {
   return {
     ...row,
+    safetyScanned: row.safetyScanned === 1,
     payload: JSON.parse(row.payload) as LearningPayload,
     evidence: JSON.parse(row.evidence) as LearningEvidenceRecord[],
     safetyFindings: JSON.parse(row.safetyFindings) as SafetyFinding[],
@@ -405,6 +422,7 @@ export interface ProposeLearningVersionInput {
   payload: unknown;
   evidence: unknown[];
   safetyFindings?: unknown[];
+  safetyScanned?: boolean;
   state: 'pending' | 'quarantined';
   createdBy: 'extractor' | 'owner';
   jobId?: string | null;
@@ -975,6 +993,7 @@ export class WorkspaceStore {
       payload: payload.data,
       evidence,
       safetyFindings: input.safetyFindings,
+      safetyScanned: true,
       state: input.state,
       createdBy: 'owner',
       baseVersionId: skill?.activeVersionId ?? null,
@@ -1047,6 +1066,8 @@ export class WorkspaceStore {
     const safety = canonicalJson(safetyParsed.data);
     if (byteLength(safety) > LEARNING_LIMITS.safetyBytes)
       throw new Error('Learning safety findings exceed their size limit.');
+    const safetyScanned =
+      input.safetyScanned ?? (input.createdBy === 'extractor');
     if (input.createdBy === 'owner' && input.jobId)
       throw new Error('Owner-authored learning has no extraction job.');
     if (input.createdBy === 'extractor') {
@@ -1148,6 +1169,7 @@ export class WorkspaceStore {
       extractorModel: input.extractorModel ?? null,
       extractorPromptVersion: input.extractorPromptVersion,
       safetyFindings: safetyParsed.data,
+      safetyScanned,
       createdAt: Date.now(),
       reviewedAt: null,
       reviewedBy: null,
@@ -1155,7 +1177,7 @@ export class WorkspaceStore {
     };
     this.db
       .prepare(
-        'INSERT INTO learning_versions (id, skillId, version, baseVersionId, state, payload, contentHash, evidence, createdBy, jobId, extractorModel, extractorPromptVersion, safetyFindings, createdAt, reviewedAt, reviewedBy, reviewNote) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)',
+        'INSERT INTO learning_versions (id, skillId, version, baseVersionId, state, payload, contentHash, evidence, createdBy, jobId, extractorModel, extractorPromptVersion, safetyFindings, safetyScanned, createdAt, reviewedAt, reviewedBy, reviewNote) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)',
       )
       .run(
         version.id,
@@ -1171,6 +1193,7 @@ export class WorkspaceStore {
         version.extractorModel,
         version.extractorPromptVersion,
         safety,
+        version.safetyScanned ? 1 : 0,
         version.createdAt,
       );
     return version;
@@ -1249,6 +1272,7 @@ export class WorkspaceStore {
     dotId: string,
     token: LearningReviewToken,
     payload: unknown,
+    scan: { safetyFindings: SafetyFinding[]; state: 'pending' | 'quarantined' },
   ): LearningVersion {
     const parsed = learningReviewTokenSchema.safeParse(token);
     if (!parsed.success)
@@ -1270,7 +1294,9 @@ export class WorkspaceStore {
         slug: skill.slug,
         payload,
         evidence: version.evidence,
-        state: 'pending',
+        safetyFindings: scan.safetyFindings,
+        safetyScanned: true,
+        state: scan.state,
         createdBy: 'owner',
         baseVersionId: skill.activeVersionId,
         extractorPromptVersion: OWNER_PROMPT_VERSION,
