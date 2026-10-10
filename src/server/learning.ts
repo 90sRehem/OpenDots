@@ -1419,6 +1419,7 @@ function repeatedWorkflowCandidate(
   items: DigestedMessage[],
   now: number,
 ): LearningJobCandidate | null {
+  if (!items.some(({ message }) => message.role === 'user')) return null;
   const names = toolNamesOf(items);
   if (names.length < LEARNING_SIGNAL_LIMITS.patternMinCalls) return null;
   const pattern = toolPatternHash(names);
@@ -1435,8 +1436,9 @@ function repeatedWorkflowCandidate(
       other.threadId,
       other.firstOrdinal,
       other.lastOrdinal,
-      ['assistant'],
+      ['user', 'assistant'],
     );
+    if (!otherItems.some(({ message }) => message.role === 'user')) continue;
     if (toolPatternHash(toolNamesOf(otherItems)) !== pattern) continue;
     const here = items.find(
       ({ message }) => assistantCalls(message).length > 0,

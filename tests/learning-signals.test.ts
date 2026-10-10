@@ -350,6 +350,86 @@ describe('repeated-workflow signal', () => {
     expect(jobsFor(conversations)).toEqual([]);
   });
 
+  /**
+   * A still-running web-owner run whose bounds hold a tool result and the
+   * assistant tool calls that answer it, but no direct owner message: the tool
+   * continuation the runner admits as its own run.
+   */
+  function toolOnlyRun(
+    conversations: ReturnType<typeof setup>['conversations'],
+    workspace: ReturnType<typeof setup>['workspace'],
+    dot: Dot,
+    threadId: string,
+  ) {
+    bind(workspace, threadId, dot);
+    const admitted = conversations.admitTurn({
+      threadId,
+      dotId: dot.id,
+      ownerId: 'owner',
+      role: 'tool',
+      content: {
+        id: `tool-${threadId}`,
+        role: 'tool',
+        toolCallId: `call-${threadId}`,
+        content: 'ok',
+      },
+      toolCallId: `call-${threadId}`,
+      source: 'web_owner',
+    });
+    conversations.appendMessage({
+      threadId,
+      dotId: dot.id,
+      ownerId: 'owner',
+      role: 'assistant',
+      content: {
+        id: `assistant-${threadId}`,
+        role: 'assistant',
+        toolCalls: pattern.map((name, index) => ({
+          id: `call-${threadId}-${index}`,
+          type: 'function',
+          function: { name, arguments: '{}' },
+        })),
+      },
+      runId: admitted.run.id,
+    });
+    return conversations.run(admitted.run.id)!;
+  }
+
+  it('ignores a tool-only run as the repeated-workflow candidate', async () => {
+    const { conversations, workspace, runner, dot } = setup();
+    bind(workspace, 'thread-prior', dot);
+    await toolTurn(runner, 'thread-prior', dot, pattern);
+    const candidate = toolOnlyRun(
+      conversations,
+      workspace,
+      dot,
+      'thread-candidate',
+    );
+    const detected = detectLearningCandidate(conversations, candidate);
+    expect(detected).toBeNull();
+    conversations.finishRunWithLearning(
+      candidate.id,
+      'completed',
+      null,
+      detected,
+    );
+    expect(jobsFor(conversations)).toEqual([]);
+  });
+
+  it('ignores a tool-only run as a repeated-workflow comparison run', async () => {
+    const { conversations, workspace, runner, dot } = setup();
+    const comparison = toolOnlyRun(
+      conversations,
+      workspace,
+      dot,
+      'thread-comparison',
+    );
+    conversations.finishRun(comparison.id, 'completed');
+    bind(workspace, 'thread-candidate', dot);
+    await toolTurn(runner, 'thread-candidate', dot, pattern);
+    expect(jobsFor(conversations)).toEqual([]);
+  });
+
   it('ignores a matching run from a Dot that is not the same Dot', async () => {
     const { conversations, workspace, runner, dot } = setup();
     const other = workspace.createDot(
