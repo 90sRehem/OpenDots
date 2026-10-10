@@ -90,6 +90,8 @@ function serve(
   opts: {
     state?: string;
     active?: boolean;
+    activeVersionId?: string;
+    baseVersionId?: string | null;
     replaces?: unknown;
     usage?: Partial<typeof usage>;
     evidence?: unknown[];
@@ -100,8 +102,9 @@ function serve(
     state: opts.active ? 'approved' : (opts.state ?? 'pending'),
     evidence: opts.evidence ?? [],
     createdBy: opts.createdBy ?? 'owner',
+    baseVersionId: opts.baseVersionId ?? null,
   });
-  const activeVersionId = opts.active ? 'v1' : null;
+  const activeVersionId = opts.active ? 'v1' : (opts.activeVersionId ?? null);
   const list = {
     extraction: {
       available: false,
@@ -244,6 +247,29 @@ it('never offers approval for a quarantined lesson and says it cannot be approve
   expect(buttonsNamed(renderer, 'Approve and activate')).toHaveLength(0);
   expect(bodyText(renderer)).toContain('cannot be approved');
   expect(bodyText(renderer)).toContain('Quarantined');
+});
+
+it('does not offer approval for a proposal whose base version is no longer active', async () => {
+  serve({ baseVersionId: 'v0' });
+  const renderer = await render();
+  expect(buttonsNamed(renderer, 'Approve and activate')).toHaveLength(0);
+  expect(bodyText(renderer)).toContain(
+    'written against a version that is no longer active',
+  );
+  expect(buttonsNamed(renderer, 'Edit as new proposal')).toHaveLength(1);
+});
+
+it('does not offer approval when another version became active after the proposal', async () => {
+  const active = version({ id: 'v2', version: 2, state: 'approved' });
+  serve({ activeVersionId: 'v2', replaces: active, baseVersionId: null });
+  const renderer = await render();
+  expect(buttonsNamed(renderer, 'Approve and activate')).toHaveLength(0);
+  expect(
+    buttonsNamed(renderer, 'Approve and replace active version'),
+  ).toHaveLength(0);
+  expect(bodyText(renderer)).toContain(
+    'written against a version that is no longer active',
+  );
 });
 
 it('shows an active lesson as live only when delivery is on, and asks before retiring', async () => {

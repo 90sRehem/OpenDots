@@ -349,8 +349,12 @@ export function LearningReview({
     const active = detail.skill.activeVersionId === version.id;
     // Only a proposal waiting for review can replace the active version.
     const waiting = state === 'pending' || state === 'quarantined';
+    const baseMatches =
+      (version.baseVersionId ?? null) ===
+      (detail.skill.activeVersionId ?? null);
+    const staleBase = waiting && !baseMatches;
     const diffs =
-      waiting && !active && replaces
+      waiting && !active && replaces && baseMatches
         ? payloadDiff(replaces.payload, version.payload)
         : null;
     const pendingNoReplace = waiting && !replaces;
@@ -474,6 +478,12 @@ export function LearningReview({
               <Diff key={diff.key} diff={diff} />
             ))}
           </dl>
+        ) : staleBase ? (
+          <p className="muted">
+            This proposal was written against a version that is no longer
+            active, so it cannot be approved. Edit it into a fresh proposal to
+            review it again.
+          </p>
         ) : pendingNoReplace ? (
           <p className="muted">
             Nothing is active under this name, so approving makes it the first
@@ -490,7 +500,7 @@ export function LearningReview({
         </p>
 
         <div className="learning-actions">
-          {state === 'pending' && (
+          {state === 'pending' && baseMatches && (
             <button
               className="primary"
               // Replacing the active version adds no active lesson, so only a
