@@ -181,16 +181,29 @@ For remote hosting, configure an HTTPS reverse proxy and the matching `APP_ORIGI
 
 ## Automatic Learning
 
-Automatic Learning runs locally. The workspace database stores proposed skills,
-each version's review state, and the approved library a Dot delivers. No
-Intelligence credential or remote skill catalog is on the delivery path.
+Automatic Learning runs locally. Lessons are stored in the local OpenDots
+database, and nothing is sent to Intelligence. The workspace database stores
+proposed skills, each version's review state, and the approved library a Dot
+delivers. No Intelligence credential or remote skill catalog is on the delivery
+path.
 
-Each Dot owns its library. Enable **Use published skills** in the Dot's settings;
-delivery also requires the workspace and Dot **Memory** permissions. On each new
-turn, OpenDots adds the Dot's approved catalog to the system prompt and exposes
-the application-owned, read-only `load_local_skill` tool. The model decides which
-relevant skills to load, up to two bodies per turn. Check the run's tool calls to
-verify actual use; saving settings alone does not load anything.
+Each Dot owns its library. The **Automatic Learning** settings in the Dot dialog
+control local delivery:
+
+- **Learn from future conversations** enrolls the Dot in learning from new work.
+  Only conversations started after you turn it on are used; old conversations are
+  not scanned. Automatic suggestions are unavailable until a local model is
+  connected, so none appear yet.
+- **Use approved lessons** uses this Dot's approved lessons in new turns.
+  Turning it off stops their use without deleting them. Delivery also requires
+  the workspace and Dot **Memory** permissions.
+- **Review lessons** opens the review screen, where the owner lists, reads,
+  writes, approves, rejects, edits, retires, and restores lessons.
+
+On each new turn, OpenDots adds the Dot's approved catalog to the system prompt
+and exposes the application-owned, read-only `load_local_skill` tool. The model
+decides which relevant skills to load, up to two bodies per turn. Check the run's
+tool calls to verify actual use; saving settings alone does not load anything.
 
 Only an active, approved version enters a catalog. Pending, quarantined, and
 rejected versions never appear in a catalog and cannot be loaded. Approval is
@@ -210,12 +223,7 @@ collection. When delivery is off, the turn continues without a catalog.
 A delivery, permission, or active-library change bumps the Dot's learning
 revision. In-flight snapshots stop loading, and a revoked learned body is
 replaced with a marker before it can reach the model again, so it cannot be
-replayed. Uncheck **Use published skills** to continue without skills.
-
-The Dot dialog still stores a **Learning container ID** and validates it as a
-1–64 character lowercase slug, but it no longer selects a remote container or
-gates delivery. OpenDots does not read `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`
-or `CPK_INTELLIGENCE_SKILLS_REVISION`.
+replayed. Uncheck **Use approved lessons** to continue without skills.
 
 Automatic extraction is optional. Set `LEARNING_EXTRACTOR_URL` to an
 OpenAI-compatible endpoint on `http://127.0.0.1` or `http://[::1]` (no URL

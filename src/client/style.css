@@ -4280,3 +4280,103 @@ h3 {
   overflow-wrap: anywhere;
   font-size: 11px;
 }
+
+/* Learning review: the owner's lesson screen inside the Dot dialog. */
+.modal.modal-wide {
+  max-width: 920px;
+}
+.learning-review h4 {
+  font-size: 13px;
+  margin: 18px 0 6px;
+}
+.learning-review h5 {
+  font-size: 11px;
+  margin: 16px 0 4px;
+  color: #838898;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.learning-layout {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-top: 16px;
+}
+.learning-list ul,
+.learning-detail ul,
+.learning-detail ol {
+  padding-left: 18px;
+  margin: 4px 0;
+}
+.learning-list ul {
+  list-style: none;
+  padding-left: 0;
+}
+.learning-list li button {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  flex-wrap: wrap;
+  margin: 2px 0;
+}
+.learning-list li button[aria-current='true'] {
+  border-color: #b8c4fa;
+  background: #f0f3ff;
+}
+.learning-list small {
+  color: #838898;
+}
+.learning-alert {
+  color: #a4372a;
+  font-weight: 500;
+}
+.learning-state {
+  font-weight: 500;
+}
+.learning-exact dt,
+.learning-diff dt {
+  font-weight: 600;
+  margin-top: 8px;
+}
+.learning-exact dd,
+.learning-diff dd {
+  margin: 2px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.learning-diff ins {
+  background: #e3f5e8;
+  text-decoration: none;
+}
+.learning-diff del {
+  background: #fbe4e1;
+}
+.learning-actions,
+.learning-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+.learning-confirm {
+  align-items: center;
+  border: 1px solid #e5e5e5;
+  border-radius: 10px;
+  padding: 10px;
+}
+.learning-confirm p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.learning-form textarea {
+  width: 100%;
+}
+.learning-provenance {
+  font-size: 11px;
+}
+@media (max-width: 700px) {
+  .learning-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

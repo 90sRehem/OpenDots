@@ -99,6 +99,24 @@ export function learningReviewToken(
   };
 }
 
+export interface LearningExtractionStatus {
+  available: boolean;
+  reason: string;
+}
+
+/**
+ * Whether automatic extraction can run. No local model endpoint is configured in
+ * this build, so it is reported unavailable; manual authoring stays available.
+ * The extraction worker replaces this with the endpoint's readiness.
+ */
+export function learningExtractionStatus(): LearningExtractionStatus {
+  return {
+    available: false,
+    reason:
+      'No local extraction model is connected. You can still write, edit, and review lessons yourself.',
+  };
+}
+
 const words = (text: string) =>
   new Set(text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []);
 

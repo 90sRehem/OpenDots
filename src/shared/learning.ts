@@ -91,3 +91,56 @@ export function validateLegacyLearningContainer(containerId: string | null) {
       'Dot Learning container ID must use 1–64 lowercase letters, numbers, and single hyphens.',
     );
 }
+
+/** Owner-authored proposal. The payload's `name` is the skill slug. */
+export const learningProposalSchema = z
+  .object({ payload: learningPayloadSchema })
+  .strict();
+
+/** Owner edit: the reviewed version the owner read, plus the replacement payload. */
+export const learningEditSchema = z
+  .object({ review: learningReviewTokenSchema, payload: learningPayloadSchema })
+  .strict();
+
+/** Approve, reject, retire, and restore: the exact reviewed token, plus an optional note. */
+export const learningReviewActionSchema = z
+  .object({
+    review: learningReviewTokenSchema,
+    note: z.string().max(500).nullable().optional(),
+  })
+  .strict();
+
+export const LEARNING_VERSION_STATES = [
+  'pending',
+  'quarantined',
+  'approved',
+  'rejected',
+  'retired',
+  'superseded',
+] as const;
+export type LearningVersionStateName = (typeof LEARNING_VERSION_STATES)[number];
+
+/**
+ * Wire shape of one learning version, as the owner screen receives it. `evidence`
+ * and `payload` are the exact stored values; `evidenceHash` is what a review token
+ * must echo back.
+ */
+export interface LearningVersionView {
+  id: string;
+  skillId: string;
+  slug: string;
+  version: number;
+  baseVersionId: string | null;
+  state: LearningVersionStateName;
+  payload: LearningPayload;
+  contentHash: string;
+  evidenceHash: string;
+  evidence: LearningEvidenceRecord[];
+  createdBy: 'extractor' | 'owner';
+  extractorPromptVersion: string;
+  safetyFindings: SafetyFinding[];
+  createdAt: number;
+  reviewedAt: number | null;
+  reviewedBy: string | null;
+  reviewNote: string | null;
+}
