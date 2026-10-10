@@ -72,6 +72,7 @@ it('saves Learning settings through the owner API and rejects malformed containe
       )
     ).status,
   ).toBe(400);
+  // Local delivery no longer needs a legacy Intelligence container.
   expect(
     (
       await app.request(
@@ -79,7 +80,15 @@ it('saves Learning settings through the owner API and rejects malformed containe
         request({ ...body, learningContainerId: null }, 'PUT'),
       )
     ).status,
-  ).toBe(400);
+  ).toBe(200);
+  expect(ws.dot(dot.id)).toMatchObject({
+    learningContainerId: null,
+    skillDeliveryEnabled: true,
+  });
+  await app.request(
+    `/api/dots/${dot.id}`,
+    request({ ...body, learningContainerId: 'research' }, 'PUT'),
+  );
   const created = await app.request(
     '/api/dots',
     request({ ...body, spaceId: dot.spaceId }),

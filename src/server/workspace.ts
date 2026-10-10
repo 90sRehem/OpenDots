@@ -6,19 +6,43 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { validateLearningSettings } from '../shared/learning.js';
+import {
+  LEARNING_SIGNALS,
+  learningEvidenceRecordSchema,
+  learningPayloadSchema,
+  learningReviewTokenSchema,
+  learningSlugSchema,
+  safetyFindingSchema,
+  validateLegacyLearningContainer,
+  type LearningEvidenceRecord,
+  type LearningPayload,
+  type LearningReviewToken,
+  type LearningSignal,
+  type SafetyFinding,
+} from '../shared/learning.js';
 import type { CallReceipt, Conversation, Dot, Space } from '../shared/types.js';
 
 // Local Automatic Learning storage (design report sections 4.2 and 4.5). The
 // tables live in the same database file as the other stores; these helpers
 // are shared with conversation-store.ts, which owns job creation.
 
-export const LEARNING_SIGNALS = [
-  'explicit',
-  'correction',
-  'repeated_workflow',
-] as const;
-export type LearningSignal = (typeof LEARNING_SIGNALS)[number];
+// Schemas now live in shared/learning.ts; re-exported so storage callers keep
+// one import path.
+export {
+  LEARNING_SIGNALS,
+  learningEvidenceRecordSchema,
+  learningPayloadSchema,
+  learningSlugSchema,
+  safetyFindingSchema,
+};
+export type {
+  LearningEvidenceRecord,
+  LearningPayload,
+  LearningReviewToken,
+  LearningSignal,
+  SafetyFinding,
+};
+
 export type LearningVersionState =
   | 'pending'
   | 'quarantined'
@@ -41,58 +65,16 @@ export const LEARNING_LIMITS = {
   pendingVersions: 100,
   pendingVersionsPerDot: 10,
   versionsPerSkill: 8,
+  activeSkillsPerDot: 32,
+  activeSkillsWorkspace: 256,
   queuedJobs: 20,
   storageBytes: 32 * 1024 * 1024,
   jobRetentionMs: 30 * DAY_MS,
   useRetentionMs: 30 * DAY_MS,
   versionRetentionMs: 90 * DAY_MS,
+  /** A rejected skill slug is held back from automatic proposals for this long. */
+  rejectionBlockMs: 30 * DAY_MS,
 } as const;
-
-const learningSlugSchema = z
-  .string()
-  .min(1)
-  .max(64)
-  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-const boundedText = (max: number) => z.string().min(1).max(max);
-
-/** Approved payload shape. Extra keys are rejected; `name` must equal the skill slug. */
-export const learningPayloadSchema = z
-  .object({
-    name: learningSlugSchema,
-    description: boundedText(160),
-    triggers: z.array(boundedText(100)).min(1).max(5),
-    steps: z.array(boundedText(300)).min(1).max(8),
-    pitfalls: z.array(boundedText(200)).max(5),
-    verification: boundedText(300),
-    requiredTools: z.array(boundedText(80)).max(8),
-    notFor: z.array(boundedText(150)).max(3),
-  })
-  .strict();
-export type LearningPayload = z.infer<typeof learningPayloadSchema>;
-
-/** One canonical message a proposal or job cites. Ids refer to internal records only. */
-export const learningEvidenceRecordSchema = z
-  .object({
-    threadId: boundedText(200),
-    runId: boundedText(200),
-    messageId: boundedText(200),
-    ordinal: z.number().int().min(0),
-    role: z.enum(['user', 'assistant', 'tool']),
-    sha256: z.string().regex(/^[0-9a-f]{64}$/),
-    signal: z.enum(LEARNING_SIGNALS),
-  })
-  .strict();
-export type LearningEvidenceRecord = z.infer<
-  typeof learningEvidenceRecordSchema
->;
-
-const safetyFindingSchema = z
-  .object({
-    code: boundedText(80),
-    explanation: z.string().max(300),
-  })
-  .strict();
-export type SafetyFinding = z.infer<typeof safetyFindingSchema>;
 
 export function sha256Hex(text: string): string {
   return createHash('sha256').update(text).digest('hex');
@@ -113,6 +95,37 @@ function sortKeys(value: unknown): unknown {
   return value;
 }
 const byteLength = (text: string) => Buffer.byteLength(text, 'utf8');
+
+/** Digest of a version's evidence records, as a reviewer's token commits to them. */
+export function learningEvidenceHash(evidence: LearningEvidenceRecord[]) {
+  return sha256Hex(canonicalJson(evidence));
+}
+
+/** Digest of a payload's canonical JSON; a version's `contentHash` must equal it. */
+export function learningPayloadHash(payload: LearningPayload) {
+  return sha256Hex(canonicalJson(payload));
+}
+
+/** A review that the stored state no longer supports. Codes are stable for callers. */
+export type LearningReviewCode =
+  | 'invalid'
+  | 'not_found'
+  | 'state'
+  | 'stale_content'
+  | 'stale_evidence'
+  | 'stale_base'
+  | 'stale_active'
+  | 'evidence_unverified'
+  | 'capacity';
+export class LearningReviewError extends Error {
+  constructor(
+    readonly code: LearningReviewCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'LearningReviewError';
+  }
+}
 
 export function applyLearningSchema(db: DatabaseSync) {
   db.exec(`CREATE TABLE IF NOT EXISTS learning_skills (
@@ -365,6 +378,16 @@ function toLearningVersion(row: LearningVersionRow): LearningVersion {
   };
 }
 
+type LearningReviewAction = 'approve' | 'restore' | 'retire' | 'reject';
+/** The only states each review action may change; anything else is a stale or forged review. */
+const REVIEWABLE_STATES: Record<LearningReviewAction, LearningVersionState[]> =
+  {
+    approve: ['pending'],
+    restore: ['retired'],
+    retire: ['approved'],
+    reject: ['pending', 'quarantined'],
+  };
+
 export interface ProposeLearningVersionInput {
   dotId: string;
   slug: string;
@@ -512,7 +535,7 @@ export class WorkspaceStore {
     learningEnabled = false,
   ): Dot {
     this.validateSpaceAccess(spaceId, spaceIds);
-    validateLearningSettings(learningContainerId, skillDeliveryEnabled);
+    validateLegacyLearningContainer(learningContainerId);
     const dot: Dot = {
       id: randomUUID(),
       spaceId,
@@ -592,7 +615,7 @@ export class WorkspaceStore {
       patch.skillDeliveryEnabled ?? current.skillDeliveryEnabled ?? false;
     const learningEnabled =
       patch.learningEnabled ?? current.learningEnabled ?? false;
-    validateLearningSettings(learningContainerId, skillDeliveryEnabled);
+    validateLegacyLearningContainer(learningContainerId);
     // Any collection, delivery, or permission change revokes what an in-flight
     // run may still use, so it bumps the revision that run is checked against.
     const sameSpaces =
@@ -884,6 +907,244 @@ export class WorkspaceStore {
         version.createdAt,
       );
     return version;
+  }
+  /**
+   * Activates a pending version: it becomes the skill's active pointer, the
+   * previous active version is superseded, and both revisions move in the same
+   * transaction. Refused unless the token still matches content, evidence, the
+   * proposal's base, and the active pointer the commander reviewed.
+   */
+  approveLearningVersion(
+    token: LearningReviewToken,
+    note: string | null = null,
+  ): LearningVersion {
+    return this.reviewLearningVersion('approve', token, note);
+  }
+  /** Re-activates an exact retired version, only when nothing is active. */
+  restoreLearningVersion(
+    token: LearningReviewToken,
+    note: string | null = null,
+  ): LearningVersion {
+    return this.reviewLearningVersion('restore', token, note);
+  }
+  /** Removes the active version from delivery at once. Its history stays intact. */
+  retireLearningVersion(
+    token: LearningReviewToken,
+    note: string | null = null,
+  ): LearningVersion {
+    return this.reviewLearningVersion('retire', token, note);
+  }
+  /**
+   * Rejects a pending or quarantined version. The active library and every
+   * revision are untouched; the slug is held back from automatic proposals.
+   */
+  rejectLearningVersion(
+    token: LearningReviewToken,
+    note: string | null = null,
+  ): LearningVersion {
+    return this.reviewLearningVersion('reject', token, note);
+  }
+  /** Counts one load of an active version in one invocation; repeats add nothing. */
+  recordLearningUse(versionId: string, invocationId: string): boolean {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const { version, skill } = this.reviewTarget(versionId);
+      if (version.state !== 'approved' || skill.activeVersionId !== version.id)
+        throw new LearningReviewError(
+          'state',
+          'Only the active approved version can be used.',
+        );
+      const inserted =
+        this.db
+          .prepare(
+            'INSERT OR IGNORE INTO learning_uses (skillId, versionId, sourceRunId, usedAt) VALUES (?, ?, ?, ?)',
+          )
+          .run(skill.id, version.id, invocationId, Date.now()).changes > 0;
+      if (inserted)
+        this.db
+          .prepare(
+            'UPDATE learning_skills SET useCount=useCount+1, lastUsedAt=? WHERE id=?',
+          )
+          .run(Date.now(), skill.id);
+      this.db.exec('COMMIT');
+      return inserted;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  /** The Dot's revision: moved by every change to what it may deliver or use. */
+  learningRevision(dotId: string): number {
+    const row = this.db
+      .prepare('SELECT learningRevision FROM dots WHERE id=?')
+      .get(dotId) as { learningRevision: number } | undefined;
+    return Number(row?.learningRevision ?? 0);
+  }
+  private reviewLearningVersion(
+    action: LearningReviewAction,
+    token: LearningReviewToken,
+    note: string | null,
+  ): LearningVersion {
+    const parsed = learningReviewTokenSchema.safeParse(token);
+    if (!parsed.success)
+      throw new LearningReviewError(
+        'invalid',
+        'A review must name one exact version, hash, evidence digest, and active pointer.',
+      );
+    if (note !== null && note.length > 500)
+      throw new LearningReviewError(
+        'invalid',
+        'Review notes are limited to 500 characters.',
+      );
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const { version, skill } = this.reviewTarget(parsed.data.versionId);
+      if (!REVIEWABLE_STATES[action].includes(version.state))
+        throw new LearningReviewError(
+          'state',
+          `This version is ${version.state}, so ${action} does not apply.`,
+        );
+      this.checkReviewToken(version, skill, parsed.data);
+      const now = Date.now();
+      const review = [now, this.ownerId, note, version.id] as const;
+      if (action === 'reject') {
+        this.db
+          .prepare(
+            "UPDATE learning_versions SET state='rejected', reviewedAt=?, reviewedBy=?, reviewNote=? WHERE id=?",
+          )
+          .run(...review);
+        this.db
+          .prepare('UPDATE learning_skills SET blockedUntil=? WHERE id=?')
+          .run(now + LEARNING_LIMITS.rejectionBlockMs, skill.id);
+      } else if (action === 'retire') {
+        if (skill.activeVersionId !== version.id)
+          throw new LearningReviewError(
+            'state',
+            'Only the active version can be retired.',
+          );
+        this.db
+          .prepare(
+            "UPDATE learning_versions SET state='retired', reviewedAt=?, reviewedBy=?, reviewNote=? WHERE id=?",
+          )
+          .run(...review);
+        this.db
+          .prepare(
+            'UPDATE learning_skills SET activeVersionId=NULL, revision=revision+1 WHERE id=?',
+          )
+          .run(skill.id);
+        this.bumpLearningRevision(skill.dotId);
+      } else {
+        if (action === 'approve') {
+          if (
+            (version.baseVersionId ?? null) !== (skill.activeVersionId ?? null)
+          )
+            throw new LearningReviewError(
+              'stale_base',
+              'The active version changed after this proposal was written; review a fresh proposal.',
+            );
+        } else if (skill.activeVersionId)
+          throw new LearningReviewError(
+            'stale_active',
+            'Another version is active; retire it before restoring this one.',
+          );
+        // Approval is to the exact stored evidence: refuse when any cited
+        // message is gone or changed, rather than activating unverifiable text.
+        const failure = canonicalEvidenceFailure(this.db, {
+          dotId: skill.dotId,
+          evidence: version.evidence,
+        });
+        if (failure)
+          throw new LearningReviewError(
+            'evidence_unverified',
+            `The cited evidence no longer verifies (${failure}).`,
+          );
+        if (!skill.activeVersionId) this.assertActivationCapacity(skill.dotId);
+        if (skill.activeVersionId)
+          this.db
+            .prepare(
+              "UPDATE learning_versions SET state='superseded' WHERE id=?",
+            )
+            .run(skill.activeVersionId);
+        this.db
+          .prepare(
+            "UPDATE learning_versions SET state='approved', reviewedAt=?, reviewedBy=?, reviewNote=? WHERE id=?",
+          )
+          .run(...review);
+        this.db
+          .prepare(
+            'UPDATE learning_skills SET activeVersionId=?, revision=revision+1, blockedUntil=NULL WHERE id=?',
+          )
+          .run(version.id, skill.id);
+        this.bumpLearningRevision(skill.dotId);
+      }
+      this.db.exec('COMMIT');
+      return this.learningVersion(version.id)!;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  private reviewTarget(versionId: string): {
+    version: LearningVersion;
+    skill: LearningSkill;
+  } {
+    const version = this.learningVersion(versionId);
+    const skill = version
+      ? (this.db
+          .prepare('SELECT * FROM learning_skills WHERE id=?')
+          .get(version.skillId) as unknown as LearningSkill | undefined)
+      : undefined;
+    // Another owner's version is reported as absent, so its existence never leaks.
+    if (!version || !skill || skill.ownerId !== this.ownerId)
+      throw new LearningReviewError('not_found', 'Learning version not found.');
+    return { version, skill };
+  }
+  /** Compare-and-swap: every field the reviewer saw must still be the stored truth. */
+  private checkReviewToken(
+    version: LearningVersion,
+    skill: LearningSkill,
+    token: LearningReviewToken,
+  ) {
+    if (
+      token.contentHash !== version.contentHash ||
+      learningPayloadHash(version.payload) !== version.contentHash
+    )
+      throw new LearningReviewError(
+        'stale_content',
+        'The reviewed content changed; review the current version.',
+      );
+    if (token.evidenceHash !== learningEvidenceHash(version.evidence))
+      throw new LearningReviewError(
+        'stale_evidence',
+        'The reviewed evidence changed; review the current version.',
+      );
+    if (token.expectedActiveVersionId !== (skill.activeVersionId ?? null))
+      throw new LearningReviewError(
+        'stale_active',
+        'The active version changed since this review; refresh the review.',
+      );
+  }
+  private assertActivationCapacity(dotId: string) {
+    const perDot = this.db
+      .prepare(
+        'SELECT COUNT(*) AS n FROM learning_skills WHERE dotId=? AND activeVersionId IS NOT NULL',
+      )
+      .get(dotId) as { n: number };
+    if (Number(perDot.n) >= LEARNING_LIMITS.activeSkillsPerDot)
+      throw new LearningReviewError(
+        'capacity',
+        'This Dot already has its maximum active skills; retire one first.',
+      );
+    this.assertCapacity(
+      'SELECT COUNT(*) AS n FROM learning_skills WHERE activeVersionId IS NOT NULL',
+      LEARNING_LIMITS.activeSkillsWorkspace,
+      'The workspace already has its maximum active skills; retire one first.',
+    );
+  }
+  private bumpLearningRevision(dotId: string) {
+    this.db
+      .prepare('UPDATE dots SET learningRevision=learningRevision+1 WHERE id=?')
+      .run(dotId);
   }
   private assertCapacity(sql: string, limit: number, message: string) {
     const row = this.db.prepare(sql).get() as { n: number };

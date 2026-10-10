@@ -6,7 +6,7 @@ import { Platform } from './platform.js';
 import { VoiceService } from './voice.js';
 import {
   learningContainerIdSchema,
-  validateLearningSettings,
+  validateLegacyLearningContainer,
 } from '../shared/learning.js';
 const dotSchema = z
   .object({
@@ -79,10 +79,7 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         400,
       );
     try {
-      validateLearningSettings(
-        data.data.learningContainerId ?? null,
-        data.data.skillDeliveryEnabled ?? false,
-      );
+      validateLegacyLearningContainer(data.data.learningContainerId ?? null);
     } catch (error) {
       return c.json(
         {
@@ -115,11 +112,10 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
     const current = platform.workspace.dot(c.req.param('id'));
     if (!current) return c.json({ error: 'Dot not found.' }, 404);
     try {
-      validateLearningSettings(
+      validateLegacyLearningContainer(
         data.data.learningContainerId === undefined
           ? (current.learningContainerId ?? null)
           : data.data.learningContainerId,
-        data.data.skillDeliveryEnabled ?? current.skillDeliveryEnabled ?? false,
       );
     } catch (error) {
       return c.json(
