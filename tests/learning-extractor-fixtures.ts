@@ -14,7 +14,7 @@ import { citeMessage, openWebTurn, sha256 } from './learning-fixtures.js';
 // the adapter, the pinned fetch, and the call path all run unmodified.
 
 export type ModelAnswer =
-  | { kind: 'stream'; content: string; usage?: boolean }
+  | { kind: 'stream'; content: string; usage?: boolean; chunkSize?: number }
   | { kind: 'redirect'; location: string }
   | { kind: 'status'; code: number }
   | { kind: 'hang' };
@@ -66,7 +66,21 @@ export async function startLoopbackModel(
         ...(usage ? { usage } : {}),
       })}\n\n`;
     response.writeHead(200, { 'Content-Type': 'text/event-stream' });
-    response.write(frame({ role: 'assistant', content: reply.content }, null));
+    const chunkSize =
+      reply.chunkSize && reply.chunkSize > 0
+        ? reply.chunkSize
+        : reply.content.length || 1;
+    for (let offset = 0; offset < reply.content.length; offset += chunkSize) {
+      response.write(
+        frame(
+          {
+            role: offset === 0 ? 'assistant' : undefined,
+            content: reply.content.slice(offset, offset + chunkSize),
+          },
+          null,
+        ),
+      );
+    }
     response.write(
       frame(
         {},

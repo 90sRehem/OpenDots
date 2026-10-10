@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  LEARNING_EXTRACTION,
   localExtractionCall,
   learningExtractorReadiness,
+  parseExtractionReply,
   pinnedLoopbackFetch,
   runLearningExtraction,
 } from '../src/server/learning.js';
@@ -73,6 +75,25 @@ describe('pinned loopback transport', () => {
       stream: true,
     });
     expect(server.requests[0].body).not.toHaveProperty('tools');
+  });
+
+  it('bounds an over-long streamed reply instead of buffering it whole', async () => {
+    const server = await model(() => ({
+      kind: 'stream',
+      content: 'x'.repeat(LEARNING_EXTRACTION.outputChars + 2_000),
+      chunkSize: 100,
+    }));
+    const reply = await localExtractionCall(ready(server.baseURL))({
+      system: 'Return JSON.',
+      user: '{}',
+      abortController: new AbortController(),
+    });
+    expect(reply.text.length).toBeLessThanOrEqual(
+      LEARNING_EXTRACTION.outputChars,
+    );
+    expect(() => parseExtractionReply(reply.text)).toThrow(
+      'malformed_output',
+    );
   });
 
   it('reports missing usage as null, not as zero', async () => {

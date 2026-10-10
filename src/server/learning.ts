@@ -566,7 +566,14 @@ export function localExtractionCall(
     };
     for await (const chunk of stream) {
       if (chunk.type === 'TEXT_MESSAGE_CONTENT') {
-        if (typeof chunk.delta === 'string') text += chunk.delta;
+        if (typeof chunk.delta === 'string') {
+          if (
+            text.length + chunk.delta.length >
+            LEARNING_EXTRACTION.outputChars
+          )
+            break;
+          text += chunk.delta;
+        }
       } else if (chunk.type === 'RUN_ERROR')
         throw new LearningJobFailure('endpoint_error');
       else if (chunk.type === 'RUN_FINISHED') usage = usageOf(chunk.usage);
