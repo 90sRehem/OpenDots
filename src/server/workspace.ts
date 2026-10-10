@@ -1077,8 +1077,9 @@ export class WorkspaceStore {
           .run(version.id, skill.id);
         this.bumpLearningRevision(skill.dotId);
       }
+      const updated = this.learningVersion(version.id)!;
       this.db.exec('COMMIT');
-      return this.learningVersion(version.id)!;
+      return updated;
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;
@@ -1135,11 +1136,16 @@ export class WorkspaceStore {
         'capacity',
         'This Dot already has its maximum active skills; retire one first.',
       );
-    this.assertCapacity(
-      'SELECT COUNT(*) AS n FROM learning_skills WHERE activeVersionId IS NOT NULL',
-      LEARNING_LIMITS.activeSkillsWorkspace,
-      'The workspace already has its maximum active skills; retire one first.',
-    );
+    const workspace = this.db
+      .prepare(
+        'SELECT COUNT(*) AS n FROM learning_skills WHERE activeVersionId IS NOT NULL',
+      )
+      .get() as { n: number };
+    if (Number(workspace.n) >= LEARNING_LIMITS.activeSkillsWorkspace)
+      throw new LearningReviewError(
+        'capacity',
+        'The workspace already has its maximum active skills; retire one first.',
+      );
   }
   private bumpLearningRevision(dotId: string) {
     this.db

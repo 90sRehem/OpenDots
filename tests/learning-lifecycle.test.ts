@@ -421,6 +421,34 @@ describe('review authority and capacity', () => {
     );
   });
 
+  it('caps active skills workspace-wide and reports it with a capacity code', () => {
+    const { workspace, dotId } = setup();
+    const spaceId = workspace.spaces()[0].id;
+    const dots = [dotId];
+    const fullDots = Math.ceil(
+      LEARNING_LIMITS.activeSkillsWorkspace / LEARNING_LIMITS.activeSkillsPerDot,
+    );
+    while (dots.length <= fullDots)
+      dots.push(
+        workspace.createDot(spaceId, `Cap Dot ${dots.length}`, '', false, false)
+          .id,
+      );
+    let remaining = LEARNING_LIMITS.activeSkillsWorkspace;
+    for (const id of dots.slice(0, fullDots)) {
+      const take = Math.min(LEARNING_LIMITS.activeSkillsPerDot, remaining);
+      for (let index = 0; index < take; index++)
+        approve(workspace, id, `workspace-cap-${id}-${index}`);
+      remaining -= take;
+    }
+    const over = propose(workspace, dots[fullDots], 'workspace-cap-over');
+    expect(
+      codeOf(() =>
+        workspace.approveLearningVersion(learningReviewToken(over, null)),
+      ),
+    ).toBe('capacity');
+    expect(workspace.learningVersion(over.id)?.state).toBe('pending');
+  });
+
   it('counts one use per version per invocation and refuses versions that are not active', () => {
     const { workspace, dotId } = setup();
     const active = approve(workspace, dotId, 'use-review');
