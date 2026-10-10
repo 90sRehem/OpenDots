@@ -76,6 +76,9 @@ export const LEARNING_LIMITS = {
   rejectionBlockMs: 30 * DAY_MS,
 } as const;
 
+/** Provenance for versions the owner wrote or edited; no extractor ran for them. */
+export const OWNER_PROMPT_VERSION = 'owner-v1';
+
 export function sha256Hex(text: string): string {
   return createHash('sha256').update(text).digest('hex');
 }
@@ -972,6 +975,85 @@ export class WorkspaceStore {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+  /**
+   * An owner's edit of a reviewed version: a new pending version that keeps the
+   * cited evidence and is based on whatever is active now. The token must still
+   * match the version the owner read, so an edit never starts from unseen text.
+   */
+  proposeLearningEdit(
+    dotId: string,
+    token: LearningReviewToken,
+    payload: unknown,
+  ): LearningVersion {
+    const parsed = learningReviewTokenSchema.safeParse(token);
+    if (!parsed.success)
+      throw new LearningReviewError(
+        'invalid',
+        'An edit must name the exact version it replaces.',
+      );
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const { version, skill } = this.reviewTarget(parsed.data.versionId);
+      if (skill.dotId !== dotId)
+        throw new LearningReviewError(
+          'not_found',
+          'Learning version not found.',
+        );
+      this.checkReviewToken(version, skill, parsed.data);
+      const edited = this.insertLearningVersion({
+        dotId,
+        slug: skill.slug,
+        payload,
+        evidence: version.evidence,
+        state: 'pending',
+        createdBy: 'owner',
+        baseVersionId: skill.activeVersionId,
+        extractorPromptVersion: OWNER_PROMPT_VERSION,
+      });
+      this.db.exec('COMMIT');
+      return edited;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  /** A version and its skill, only when both belong to this owner and this Dot. */
+  learningVersionFor(
+    dotId: string,
+    versionId: string,
+  ): { version: LearningVersion; skill: LearningSkill } | undefined {
+    const version = this.learningVersion(versionId);
+    if (!version) return undefined;
+    const skill = this.db
+      .prepare('SELECT * FROM learning_skills WHERE id=?')
+      .get(version.skillId) as unknown as LearningSkill | undefined;
+    if (!skill || skill.ownerId !== this.ownerId || skill.dotId !== dotId)
+      return undefined;
+    return { version, skill };
+  }
+  /** The same counts the caps check, so the screen can say how close a Dot is to a limit. */
+  learningUsage(dotId: string) {
+    const count = (sql: string, ...params: string[]) =>
+      Number((this.db.prepare(sql).get(...params) as { n: number }).n);
+    const pending = `SELECT COUNT(*) AS n FROM learning_versions v JOIN learning_skills s ON s.id = v.skillId WHERE v.state IN ('pending','quarantined')`;
+    return {
+      activeSkills: count(
+        'SELECT COUNT(*) AS n FROM learning_skills WHERE dotId=? AND activeVersionId IS NOT NULL',
+        dotId,
+      ),
+      activeSkillsLimit: LEARNING_LIMITS.activeSkillsPerDot,
+      workspaceActiveSkills: count(
+        'SELECT COUNT(*) AS n FROM learning_skills WHERE activeVersionId IS NOT NULL',
+      ),
+      workspaceActiveSkillsLimit: LEARNING_LIMITS.activeSkillsWorkspace,
+      pendingVersions: count(`${pending} AND s.dotId=?`, dotId),
+      pendingVersionsLimit: LEARNING_LIMITS.pendingVersionsPerDot,
+      workspacePendingVersions: count(pending),
+      workspacePendingVersionsLimit: LEARNING_LIMITS.pendingVersions,
+      skillIdentities: count('SELECT COUNT(*) AS n FROM learning_skills'),
+      skillIdentitiesLimit: LEARNING_LIMITS.skillIdentities,
+    };
   }
   /** The Dot's revision: moved by every change to what it may deliver or use. */
   learningRevision(dotId: string): number {
