@@ -27,7 +27,7 @@ Open http://127.0.0.1:4310. Keep the server running for background work.
 
 ## Conversation services
 
-Text conversations need only a model provider: set `OPENAI_API_KEY` and `OPENAI_MODEL` in `.env` (see [Connection settings](#connection-settings)). CopilotKit Intelligence is optional and enables Slack, Automatic Learning, and server-side voice or scheduled compute; choose local evaluation below, a licensed [self-hosted deployment](https://docs.copilotkit.ai/intelligence/self-hosting), or hosted Intelligence. See [Data and privacy](../README.md#data-and-privacy) for where conversation history and SQLite data are stored.
+Text conversations need only a model provider: set `OPENAI_API_KEY` and `OPENAI_MODEL` in `.env` (see [Connection settings](#connection-settings)). CopilotKit Intelligence is optional and enables Slack and server-side voice or scheduled compute; choose local evaluation below, a licensed [self-hosted deployment](https://docs.copilotkit.ai/intelligence/self-hosting), or hosted Intelligence. See [Data and privacy](../README.md#data-and-privacy) for where conversation history and SQLite data are stored.
 
 ### Hosted Intelligence
 
@@ -38,7 +38,7 @@ npx copilotkit@latest login
 npx copilotkit@latest project select
 ```
 
-`login` opens the browser to sign in or create an account. `project select` lets you select or create a project, and writes a project-scoped key to `.env` as `CPK_INTELLIGENCE_API_KEY`. Keep the generated `CPK_TELEMETRY_ID` together with the project key when deploying, including Docker. It connects SDK telemetry to the selected Intelligence account; see [signup and usage tracking](TELEMETRY.md). It removes an `INTELLIGENCE_API_KEY` line, so that the file holds one credential. Use the same project for Slack and Automatic Learning below.
+`login` opens the browser to sign in or create an account. `project select` lets you select or create a project, and writes a project-scoped key to `.env` as `CPK_INTELLIGENCE_API_KEY`. Keep the generated `CPK_TELEMETRY_ID` together with the project key when deploying, including Docker. It connects SDK telemetry to the selected Intelligence account; see [signup and usage tracking](TELEMETRY.md). It removes an `INTELLIGENCE_API_KEY` line, so that the file holds one credential. Use the same project for Slack below.
 
 Do not run `copilotkit onboard` in this folder. Onboarding is for apps that do not have CopilotKit yet. OpenDots already has its integration.
 
@@ -55,9 +55,9 @@ npx copilotkit@latest local connect
 npx copilotkit@latest local connect --approve-connection
 ```
 
-`local connect` previews the changes; the approved command writes the local API URL, gateway WebSocket URL, and project key to `.env`. OpenDots accepts these directly. Do not run `project select` afterward: it selects a hosted project. Add `OPENAI_API_KEY` and `OPENAI_MODEL` for the app, then restart `npm run dev`. Setup's Learning model is separate from the app's model.
+`local connect` previews the changes; the approved command writes the local API URL, gateway WebSocket URL, and project key to `.env`. OpenDots accepts these directly. Do not run `project select` afterward: it selects a hosted project. Add `OPENAI_API_KEY` and `OPENAI_MODEL` for the app, then restart `npm run dev`.
 
-Send a message and verify it appears in the local dashboard (`npx copilotkit@latest local login`). Use `local status` to inspect service health. Threads, Automatic Learning, and Channels are included; User Memory and Product Analytics are not. Channels require a public HTTPS address reachable by Slack or Teams.
+Send a message and verify it appears in the local dashboard (`npx copilotkit@latest local login`). Use `local status` to inspect service health. Threads and Channels are included; User Memory and Product Analytics are not. Channels require a public HTTPS address reachable by Slack or Teams.
 
 To restore the previous app connection, run `npx copilotkit@latest local cancel` and restart the app. This keeps the stack and its data. Use `local stop` to stop the stack, or `local renew` to renew its evaluation license. Existing hosted conversations are not copied into the local project.
 
@@ -181,49 +181,41 @@ For remote hosting, configure an HTTPS reverse proxy and the matching `APP_ORIGI
 
 ## Automatic Learning
 
-OpenDots connects [CopilotKit Automatic Learning](https://docs.copilotkit.ai/learning)
-to individual Dots. It uses the server-side Intelligence credential
-(`CPK_INTELLIGENCE_API_KEY` or `INTELLIGENCE_API_KEY`) and optional
-`INTELLIGENCE_API_URL`; no additional model key or frontend key is needed.
+Automatic Learning runs locally. The workspace database stores proposed skills,
+each version's review state, and the approved library a Dot delivers. No
+Intelligence credential or remote skill catalog is on the delivery path.
 
-1. Open **Learning** in the same Intelligence project and create a container for
-   one focused workflow, such as `research-workflow`. IDs use 1–64 lowercase
-   letters, numbers, and single hyphens.
-2. In OpenDots, edit the Dot and enter that ID under **Automatic Learning**.
-   Saving the ID configures routing; it does not create or verify the remote container.
-3. Start new conversations and complete related workflows. Each conversation keeps
-   the container assigned when it was created. Existing conversations, including
-   ones created before this integration, are not enrolled retroactively. Changing
-   or clearing the Dot's ID affects only new conversations. This applies to page
-   chat, scheduled and voice compute in those conversations, and new Slack threads.
-4. In Intelligence, inspect the evidence, run Learning manually or use its schedule,
-   and review and publish proposed skills. The default automatic threshold is 15
-   eligible threads; use the readiness count shown in your deployment.
-5. Enable **Skill delivery** on the Intelligence container, then enable **Use
-   published skills** in the Dot's settings. Start a new turn in an enrolled
-   conversation. BuiltInAgent loads the latest verified published catalog; its
-   TanStack AI factory runs the model and exposes `copilotkit_load_skill` and `copilotkit_read_skill_file`.
-   The model decides which relevant skills to load. Check the run's tool calls to
-   verify actual use; saving settings alone does not establish connectivity.
+Each Dot owns its library. Enable **Use published skills** in the Dot's settings;
+delivery also requires the workspace and Dot **Memory** permissions. On each new
+turn, OpenDots adds the Dot's approved catalog to the system prompt and exposes
+the application-owned, read-only `load_local_skill` tool. The model decides which
+relevant skills to load, up to two bodies per turn. Check the run's tool calls to
+verify actual use; saving settings alone does not load anything.
 
-Skill delivery always uses the conversation's original container, even after the
-Dot is pointed at another container. The Dot's delivery checkbox applies to all its
-conversations. Unchecking it stops delivery on subsequent turns; changing Learning
-settings also stops active work. Conversations without a container do not request
-skills. Existing research, memory, page, and computer permissions still apply.
+Only an active, approved version enters a catalog. Pending, quarantined, and
+rejected versions never appear in a catalog and cannot be loaded. Approval is
+compare-and-swap against the content hash, evidence digest, and active pointer
+the reviewer saw: any change refuses the approval, and an edited proposal must be
+reviewed again. Retiring a version removes it from delivery immediately;
+restoring re-activates one exact retired version only when nothing else is
+active. OpenDots does not automatically approve skills.
 
-Ingestion and delivery are separate. Clearing the container does not unenroll older
-conversations; pause Learning in Intelligence to stop its analysis. Turning off
-delivery does not stop evidence collection. A delivery denial or an unavailable
-initial skill snapshot fails the turn rather than silently continuing without the
-configured skills. Restore delivery or uncheck **Use published skills** to continue
-without them. Skills require review and publication in Intelligence; OpenDots does
-not automatically approve them.
+Conversation learning enrollment is fixed when the conversation is created;
+existing conversations are not enrolled retroactively. This applies to page chat,
+scheduled and voice compute in those conversations, and new Slack threads.
+Existing research, memory, page, and computer permissions still apply. Ingestion
+and delivery are separate: turning off delivery does not stop evidence
+collection. When delivery is off, the turn continues without a catalog.
 
-The integration uses an explicit container list, so ambient
-`CPK_INTELLIGENCE_LEARNING_CONTAINER_ID` and `CPK_INTELLIGENCE_SKILLS_REVISION`
-variables do not override a conversation's configuration. Self-hosted Intelligence
-must support the [skill delivery endpoints](https://docs.copilotkit.ai/intelligence/learned-skills).
+A delivery, permission, or active-library change bumps the Dot's learning
+revision. In-flight snapshots stop loading, and a revoked learned body is
+replaced with a marker before it can reach the model again, so it cannot be
+replayed. Uncheck **Use published skills** to continue without skills.
+
+The Dot dialog still stores a **Learning container ID** and validates it as a
+1–64 character lowercase slug, but it no longer selects a remote container or
+gates delivery. OpenDots does not read `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`
+or `CPK_INTELLIGENCE_SKILLS_REVISION`.
 
 ## Development checks
 
