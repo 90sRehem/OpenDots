@@ -158,6 +158,7 @@ describe('durable task lifecycle', () => {
     try {
       const task = store.createTask('Share the database file');
       const { run } = conversations.admitTurn({
+        source: 'web_owner',
         threadId: 'thread-shared',
         dotId: 'dot-1',
         ownerId: 'owner-1',

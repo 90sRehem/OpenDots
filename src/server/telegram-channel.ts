@@ -164,6 +164,7 @@ export class TelegramChannel {
       role: 'user',
       content: userMessage,
       metadata: { platform: PLATFORM, chatId: message.chat.id },
+      source: 'channel_owner',
     });
     if (!admitted) return;
 
@@ -201,6 +202,7 @@ export class TelegramChannel {
           role: 'assistant',
           content: { id: randomUUID(), role: 'assistant', content: reply },
           metadata: { platform: PLATFORM },
+          runId: admitted.run.id,
         });
       }
       this.store.finishRun(

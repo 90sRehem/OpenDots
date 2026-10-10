@@ -116,6 +116,7 @@ it('runs a voice receipt on the local runner and commits the marked prompt and r
       'thread-receipt',
       'Record my call',
       new AbortController().signal,
+      'voice_receipt',
       { opendotsSource: 'voice_receipt' },
     ),
   ).toBe('Confirmed receipt');
@@ -140,6 +141,7 @@ it('marks a scheduled prompt with its own prefix and keeps the user role', async
     'thread-task',
     'Check the nightly report',
     new AbortController().signal,
+    'scheduled_task',
     { opendotsSource: 'scheduled_task' },
   );
   expect(store.messages('thread-task')[0].content).toMatchObject({
@@ -159,6 +161,7 @@ it('stops an in-flight turn through the runner, records it interrupted, and repo
     'thread-cancel',
     'Call',
     controller.signal,
+    'voice_compute',
   );
   await agent.started;
   controller.abort(new Error('Call ended'));
@@ -177,6 +180,7 @@ it('never calls the model for a turn whose caller gave up while it waited behind
     'thread-queue',
     'First',
     new AbortController().signal,
+    'voice_compute',
   );
   await blocking.started;
 
@@ -188,6 +192,7 @@ it('never calls the model for a turn whose caller gave up while it waited behind
     'thread-queue',
     'Second',
     controller.signal,
+    'voice_compute',
   );
   controller.abort(new Error('Gave up waiting'));
   await runner.stop({ threadId: 'thread-queue' });
@@ -211,6 +216,7 @@ it('surfaces a provider failure as the turn error and records the run failed', a
       'thread-fail',
       'Call',
       new AbortController().signal,
+      'voice_compute',
     ),
   ).rejects.toThrow('Provider failed');
   expect(store.runs('thread-fail')[0].status).toBe('failed');
@@ -224,6 +230,7 @@ it('rejects a turn that produces no assistant text rather than reusing an earlie
     'thread-silent',
     'First',
     new AbortController().signal,
+    'voice_compute',
   );
   await expect(
     runThreadTurn(
@@ -232,6 +239,7 @@ it('rejects a turn that produces no assistant text rather than reusing an earlie
       'thread-silent',
       'Second',
       new AbortController().signal,
+      'voice_compute',
     ),
   ).rejects.toThrow('no assistant response');
   expect(store.runs('thread-silent').map((run) => run.status)).toEqual([

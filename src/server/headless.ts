@@ -13,6 +13,7 @@ import { Observable, of } from 'rxjs';
 import { voiceReceiptMessagePrefix } from '../shared/voice-receipt.js';
 import { scheduledTaskMessagePrefix } from '../shared/scheduled-message.js';
 import type { ConversationRunner } from './conversation-runner.js';
+import type { ServerTurnSource } from './conversation-store.js';
 
 export function currentTurnText(messages: Message[], error?: Error): string {
   if (error) throw error;
@@ -59,13 +60,17 @@ class TurnAgent extends AbstractAgent {
  *
  * Aborting `signal` stops an in-flight turn through `runner.stop`, which
  * records it `interrupted`; the caller then sees the signal's reason.
+ *
+ * `source` is chosen by the server caller and recorded as the run's origin.
+ * It is never derived from `metadata`, which is only the message's display data.
  */
 export async function runThreadTurn(
-  runner: Pick<ConversationRunner, 'run' | 'stop'>,
+  runner: Pick<ConversationRunner, 'runTurn' | 'stop'>,
   agent: AbstractAgent,
   threadId: string,
   prompt: string,
   signal: AbortSignal,
+  source: ServerTurnSource,
   metadata?: Record<string, unknown>,
 ): Promise<string> {
   signal.throwIfAborted();
@@ -89,19 +94,22 @@ export async function runThreadTurn(
   try {
     await new Promise<void>((resolve) => {
       runner
-        .run({
-          threadId,
-          agent: new TurnAgent(agent, signal),
-          input: {
+        .runTurn(
+          {
             threadId,
-            runId,
-            state: undefined,
-            messages: [message],
-            tools: [],
-            context: [],
-            forwardedProps: {},
+            agent: new TurnAgent(agent, signal),
+            input: {
+              threadId,
+              runId,
+              state: undefined,
+              messages: [message],
+              tools: [],
+              context: [],
+              forwardedProps: {},
+            },
           },
-        })
+          source,
+        )
         .subscribe({
           next: (event) => {
             if (event.type === EventType.TEXT_MESSAGE_START) {

@@ -334,6 +334,7 @@ describe('restart durability', () => {
   it('marks a run left `running` by a prior process `interrupted` instead of resuming it', () => {
     const { store, path } = fixtureStore(true);
     store.admitTurn({
+      source: 'web_owner',
       threadId: 'thread-crash',
       dotId: 'dot-1',
       ownerId: 'owner-1',
