@@ -1,5 +1,9 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
+vi.mock('../src/client/api', () => ({
+  api: vi.fn(),
+  ApiError: class ApiError extends Error {},
+}));
 import { WorkspaceDialog } from '../src/client/WorkspaceDialog';
 import type { Dot, State, WorkspaceState } from '../src/shared/types';
 
