@@ -108,6 +108,34 @@ export interface LearningJob {
   errorCode: string | null;
   createdAt: number;
 }
+/** The owner's current consent for one thread, read fresh from canonical bindings. */
+export interface LearningConsent {
+  ownerId: string;
+  dotId: string;
+  enrolled: boolean;
+  learningEnabled: boolean;
+  memoryAllowed: boolean;
+}
+/** Budget inputs for one claim. Every count is read inside the claiming transaction. */
+export interface LearningClaimLimits {
+  dayStart: number;
+  dailyCalls: number;
+  dailyTokens: number;
+  dailyTimeoutMs: number;
+  callTimeoutMs: number;
+  dotDailyCalls: number;
+  dotIntervalMs: number;
+  reservedInputTokens: number;
+  reservedOutputTokens: number;
+}
+export type LearningClaimSkip =
+  | 'not_queued'
+  | 'concurrent'
+  | 'daily_calls'
+  | 'daily_tokens'
+  | 'daily_timeout'
+  | 'dot_daily'
+  | 'dot_interval';
 export interface FinishedRun {
   run: ConversationRun;
   job: LearningJob | null;
@@ -610,6 +638,200 @@ export class ConversationStore {
         .prepare('SELECT * FROM learning_jobs ORDER BY createdAt')
         .all() as unknown as LearningJobRow[]
     ).map(toLearningJob);
+  }
+  /** Queued learning jobs, oldest first. The extraction worker takes them one at a time. */
+  learningJobsQueued(): LearningJob[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT * FROM learning_jobs WHERE state='queued' ORDER BY createdAt, id",
+        )
+        .all() as unknown as LearningJobRow[]
+    ).map(toLearningJob);
+  }
+  learningJob(id: string): LearningJob | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM learning_jobs WHERE id=?')
+      .get(id) as unknown as LearningJobRow | undefined;
+    return row ? toLearningJob(row) : undefined;
+  }
+  /** The thread's owner, Dot, and consent flags as they stand now. */
+  learningConsent(threadId: string): LearningConsent | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT tb.ownerId, tb.dotId, tb.localLearningEnrolled, d.learningEnabled, d.memoryAllowed
+         FROM thread_bindings tb JOIN dots d ON d.id = tb.dotId
+         WHERE tb.id = ?`,
+      )
+      .get(threadId) as
+      | {
+          ownerId: string;
+          dotId: string;
+          localLearningEnrolled: number;
+          learningEnabled: number;
+          memoryAllowed: number;
+        }
+      | undefined;
+    if (!row) return undefined;
+    return {
+      ownerId: row.ownerId,
+      dotId: row.dotId,
+      enrolled: !!row.localLearningEnrolled,
+      learningEnabled: !!row.learningEnabled,
+      memoryAllowed: !!row.memoryAllowed,
+    };
+  }
+  /** Canonical evidence check for a job's cited records; null when every record verifies. */
+  learningEvidenceFailure(input: {
+    dotId: string;
+    sourceRunId: string;
+    evidence: LearningEvidenceRecord[];
+  }): string | null {
+    return canonicalEvidenceFailure(this.db, input);
+  }
+  /** Canonical messages of one run's ordinal bounds, oldest first. */
+  messagesBetween(
+    threadId: string,
+    firstOrdinal: number,
+    lastOrdinal: number,
+  ): ConversationMessage[] {
+    return (
+      this.db
+        .prepare(
+          'SELECT * FROM messages WHERE threadId=? AND ordinal BETWEEN ? AND ? ORDER BY ordinal',
+        )
+        .all(threadId, firstOrdinal, lastOrdinal) as unknown as MessageRow[]
+    ).map(toMessage);
+  }
+  /**
+   * Moves one queued job to running under a new lease. The budget counts and the
+   * single-running check happen in the same BEGIN IMMEDIATE transaction as the
+   * update, so two claims cannot both pass a limit. A claim reserves its input
+   * and output tokens; that reservation is never refunded.
+   */
+  claimLearningJob(
+    id: string,
+    lease: string,
+    limits: LearningClaimLimits,
+    now = Date.now(),
+  ): { job: LearningJob } | { skipped: LearningClaimSkip } {
+    return this.transaction<
+      { job: LearningJob } | { skipped: LearningClaimSkip }
+    >(() => {
+      const job = this.learningJob(id);
+      if (!job || job.state !== 'queued') return { skipped: 'not_queued' };
+      const running = this.db
+        .prepare(
+          "SELECT COUNT(*) AS n FROM learning_jobs WHERE ownerId=? AND state='running'",
+        )
+        .get(job.ownerId) as { n: number };
+      if (Number(running.n) > 0) return { skipped: 'concurrent' };
+      const day = this.db
+        .prepare(
+          'SELECT COUNT(*) AS n, COALESCE(SUM(reservedInputTokens + reservedOutputTokens), 0) AS tokens FROM learning_jobs WHERE ownerId=? AND startedAt >= ?',
+        )
+        .get(job.ownerId, limits.dayStart) as { n: number; tokens: number };
+      const calls = Number(day.n);
+      if (calls + 1 > limits.dailyCalls) return { skipped: 'daily_calls' };
+      const reserved = limits.reservedInputTokens + limits.reservedOutputTokens;
+      if (Number(day.tokens) + reserved > limits.dailyTokens)
+        return { skipped: 'daily_tokens' };
+      if ((calls + 1) * limits.callTimeoutMs > limits.dailyTimeoutMs)
+        return { skipped: 'daily_timeout' };
+      const dot = this.db
+        .prepare(
+          'SELECT COUNT(*) AS n FROM learning_jobs WHERE ownerId=? AND dotId=? AND startedAt >= ?',
+        )
+        .get(job.ownerId, job.dotId, limits.dayStart) as { n: number };
+      if (Number(dot.n) + 1 > limits.dotDailyCalls)
+        return { skipped: 'dot_daily' };
+      const recent = this.db
+        .prepare(
+          'SELECT 1 FROM learning_jobs WHERE ownerId=? AND dotId=? AND startedAt > ? LIMIT 1',
+        )
+        .get(job.ownerId, job.dotId, now - limits.dotIntervalMs);
+      if (recent) return { skipped: 'dot_interval' };
+      this.db
+        .prepare(
+          "UPDATE learning_jobs SET state='running', lease=?, startedAt=?, reservedInputTokens=?, reservedOutputTokens=? WHERE id=? AND state='queued'",
+        )
+        .run(
+          lease,
+          now,
+          limits.reservedInputTokens,
+          limits.reservedOutputTokens,
+          id,
+        );
+      return { job: this.learningJob(id)! };
+    });
+  }
+  /**
+   * Commits a running job's outcome only while its lease is still current. A
+   * stale or superseded lease changes nothing and returns false.
+   */
+  finishLearningJob(
+    id: string,
+    lease: string,
+    outcome: {
+      state: Extract<
+        LearningJob['state'],
+        'completed' | 'no_change' | 'failed' | 'interrupted' | 'cancelled'
+      >;
+      errorCode: string | null;
+      inputTokens: number | null;
+      outputTokens: number | null;
+    },
+    now = Date.now(),
+  ): boolean {
+    return this.transaction(() => {
+      const result = this.db
+        .prepare(
+          "UPDATE learning_jobs SET state=?, finishedAt=?, errorCode=?, inputTokens=?, outputTokens=? WHERE id=? AND lease=? AND state='running'",
+        )
+        .run(
+          outcome.state,
+          now,
+          outcome.errorCode,
+          outcome.inputTokens,
+          outcome.outputTokens,
+          id,
+          lease,
+        );
+      return Number(result.changes) === 1;
+    });
+  }
+  /** Whether this lease still owns the running job. */
+  learningLeaseHeld(id: string, lease: string): boolean {
+    return !!this.db
+      .prepare(
+        "SELECT 1 FROM learning_jobs WHERE id=? AND lease=? AND state='running'",
+      )
+      .get(id, lease);
+  }
+  /** Cancels a job that has not started. A running job ends through finishLearningJob. */
+  cancelLearningJob(id: string, errorCode: string, now = Date.now()): boolean {
+    return this.transaction(() => {
+      const result = this.db
+        .prepare(
+          "UPDATE learning_jobs SET state='cancelled', finishedAt=?, errorCode=? WHERE id=? AND state='queued'",
+        )
+        .run(now, errorCode, id);
+      return Number(result.changes) === 1;
+    });
+  }
+  /**
+   * Startup recovery: a job still running belonged to a process that exited.
+   * It becomes interrupted and is never repeated, so no paid call runs twice.
+   */
+  interruptRunningLearningJobs(now = Date.now()): number {
+    return this.transaction(() => {
+      const result = this.db
+        .prepare(
+          "UPDATE learning_jobs SET state='interrupted', finishedAt=?, errorCode='restart' WHERE state='running'",
+        )
+        .run(now);
+      return Number(result.changes);
+    });
   }
   recordEvent(threadId: string, runId: string, payload: unknown): AgUiEvent {
     return this.transaction(() => this.insertEvent(threadId, runId, payload));

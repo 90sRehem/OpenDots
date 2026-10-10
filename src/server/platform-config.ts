@@ -41,6 +41,9 @@ export interface PlatformConfig extends WebConfig {
   model?: string;
   apiKey?: string;
   baseUrl: string;
+  /** A pinned loopback endpoint for local learning extraction. Never the chat provider. */
+  learningExtractorUrl?: string;
+  learningExtractorModel?: string;
   computerSupervisorUrl?: string;
   computerSupervisorToken?: string;
   computerToken?: string;

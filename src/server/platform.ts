@@ -20,9 +20,35 @@ import { validateRuntimeScope } from './runtime-scope.js';
 import { ConversationRunner } from './conversation-runner.js';
 import {
   ConversationStore,
+  type LearningJob,
   type ServerTurnSource,
 } from './conversation-store.js';
 import { SetupTelemetry } from './setup-telemetry.js';
+import {
+  extractionClaimLimits,
+  learningConsentCurrent,
+  learningExtractorReadiness,
+  LEARNING_EXTRACTION,
+  localExtractionCall,
+  LearningStop,
+  runLearningExtraction,
+  type ExtractionCall,
+  type LearningExtractorReadiness,
+} from './learning.js';
+
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done, { once: true });
+  });
+}
+
 export class Platform {
   readonly setupTelemetry: SetupTelemetry;
   readonly pages: PageService;
@@ -32,6 +58,9 @@ export class Platform {
   private readonly runner: ConversationRunner;
   private readonly turns = new Set<Promise<string>>();
   private readonly shutdown = new AbortController();
+  private readonly extraction: LearningExtractorReadiness;
+  private readonly extractionCall?: ExtractionCall;
+  private extractionLoop: Promise<void> = Promise.resolve();
   constructor(
     readonly store: Store,
     readonly workspace: WorkspaceStore,
@@ -56,6 +85,17 @@ export class Platform {
     // Web chat, scheduled tasks, and voice compute all share this runner, so
     // they share one canonical transcript per thread.
     this.runner = new ConversationRunner(conversationStore, workspace.ownerId);
+    // Local extraction is optional. Without an approved loopback endpoint it is
+    // visibly unavailable, and nothing falls back to the chat provider.
+    this.extraction = learningExtractorReadiness(
+      config.learningExtractorUrl,
+      config.learningExtractorModel,
+    );
+    if (this.extraction.state === 'ready')
+      this.extractionCall = localExtractionCall(this.extraction);
+    // A job still running belonged to a process that exited. It becomes
+    // interrupted and is never repeated, so no paid call runs twice.
+    conversationStore.interruptRunningLearningJobs();
     const runtime = new CopilotRuntime({
       runner: this.runner,
       telemetryId: this.setupTelemetry.identity,
@@ -126,14 +166,147 @@ export class Platform {
   }
   async start() {
     this.setupTelemetry.start();
+    if (this.extraction.state === 'ready')
+      this.extractionLoop = this.runExtractionLoop();
   }
   async stop() {
     // Each in-flight turn ends through `runner.stop`, so it is recorded
     // `interrupted` before the database closes. Nothing resumes it next start.
     this.shutdown.abort(new Error('Server is stopping.'));
     await Promise.allSettled([...this.turns]);
+    // The extraction loop stops its one call as `interrupted` before the store closes.
+    await this.extractionLoop;
     await this.setupTelemetry.stop();
     this.conversationStore.close();
+  }
+  /** Whether local learning extraction can run, and if not, why. Manual authoring is unaffected. */
+  learningExtraction():
+    | { state: 'ready'; model: string }
+    | { state: 'unavailable'; reason: string } {
+    return this.extraction.state === 'ready'
+      ? { state: 'ready', model: this.extraction.model }
+      : { state: 'unavailable', reason: this.extraction.reason };
+  }
+  /** Live foreground work: any turn in flight, or any admitted run still queued or executing. */
+  private foregroundBusy(): boolean {
+    return this.turns.size > 0 || this.runner.foregroundRuns() > 0;
+  }
+  /** The reason background extraction must stop now, or null. Pause stops; revoked memory or consent cancels. */
+  private learningBlockedBy(
+    job?: LearningJob,
+  ): 'paused' | 'consent_revoked' | null {
+    const settings = this.store.settings();
+    if (settings.paused) return 'paused';
+    if (!settings.memoryAllowed) return 'consent_revoked';
+    if (
+      job &&
+      !learningConsentCurrent(
+        this.conversationStore.learningConsent(job.threadId),
+        job,
+      )
+    )
+      return 'consent_revoked';
+    return null;
+  }
+  /**
+   * One pass of the single bounded extraction worker. It claims at most one job
+   * and runs it to a terminal state before returning. It never runs while
+   * foreground work is live, and a global budget or concurrency skip ends the
+   * pass so no other job can claim past it.
+   */
+  private async extractOnce(): Promise<'ran' | 'waiting' | 'idle'> {
+    if (this.extraction.state !== 'ready') return 'idle';
+    const settings = this.store.settings();
+    if (!settings.memoryAllowed) {
+      for (const job of this.conversationStore.learningJobsQueued())
+        this.conversationStore.cancelLearningJob(job.id, 'consent_revoked');
+      return 'idle';
+    }
+    if (settings.paused) return 'idle';
+    if (this.foregroundBusy()) return 'waiting';
+    for (const job of this.conversationStore.learningJobsQueued()) {
+      if (
+        !learningConsentCurrent(
+          this.conversationStore.learningConsent(job.threadId),
+          job,
+        )
+      ) {
+        this.conversationStore.cancelLearningJob(job.id, 'consent_revoked');
+        continue;
+      }
+      const lease = randomUUID();
+      const claim = this.conversationStore.claimLearningJob(
+        job.id,
+        lease,
+        extractionClaimLimits(Date.now()),
+      );
+      if ('skipped' in claim) {
+        if (
+          claim.skipped === 'dot_daily' ||
+          claim.skipped === 'dot_interval' ||
+          claim.skipped === 'not_queued'
+        )
+          continue;
+        return 'idle';
+      }
+      await this.extractClaimed(claim.job, lease);
+      return 'ran';
+    }
+    return 'idle';
+  }
+  /**
+   * Runs one claimed job. A watchdog stops the call on shutdown, live foreground
+   * work, pause, or revoked consent. The stop reason decides the terminal state.
+   */
+  private async extractClaimed(job: LearningJob, lease: string): Promise<void> {
+    if (this.extraction.state !== 'ready' || !this.extractionCall) return;
+    const { model } = this.extraction;
+    const stop = new AbortController();
+    const watch = setInterval(() => {
+      if (stop.signal.aborted) return;
+      if (this.shutdown.signal.aborted)
+        stop.abort(new LearningStop('shutdown'));
+      else if (this.foregroundBusy()) stop.abort(new LearningStop('preempted'));
+      else {
+        const blocked = this.learningBlockedBy(job);
+        if (blocked) stop.abort(new LearningStop(blocked));
+      }
+    }, LEARNING_EXTRACTION.watchdogMs);
+    try {
+      await runLearningExtraction(
+        job,
+        lease,
+        {
+          conversations: this.conversationStore,
+          workspace: this.workspace,
+          call: this.extractionCall,
+          model,
+          timeoutMs: LEARNING_EXTRACTION.timeoutMs,
+          blockedBy: () => this.learningBlockedBy(job),
+        },
+        stop.signal,
+      );
+    } finally {
+      clearInterval(watch);
+    }
+  }
+  /** The worker loop: one pass after another, waiting while foreground work or an idle queue holds it. */
+  private async runExtractionLoop(): Promise<void> {
+    while (!this.shutdown.signal.aborted) {
+      let pass: 'ran' | 'waiting' | 'idle';
+      try {
+        pass = await this.extractOnce();
+      } catch {
+        pass = 'idle';
+      }
+      if (pass === 'ran') continue;
+      await sleep(
+        pass === 'waiting'
+          ? LEARNING_EXTRACTION.foregroundPollMs
+          : LEARNING_EXTRACTION.queuePollMs,
+        this.shutdown.signal,
+      );
+    }
   }
   async createConversation(dotId: string, title: string) {
     this.requireReady();

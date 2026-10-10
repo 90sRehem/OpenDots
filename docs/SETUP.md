@@ -217,6 +217,16 @@ The Dot dialog still stores a **Learning container ID** and validates it as a
 gates delivery. OpenDots does not read `CPK_INTELLIGENCE_LEARNING_CONTAINER_ID`
 or `CPK_INTELLIGENCE_SKILLS_REVISION`.
 
+Automatic extraction is optional. Set `LEARNING_EXTRACTOR_URL` to an
+OpenAI-compatible endpoint on `http://127.0.0.1` or `http://[::1]` (no URL
+credentials, no redirects) and `LEARNING_EXTRACTOR_MODEL` to the model it
+serves. OpenDots makes at most one tool-free call at a time, only while no chat
+turn is running. The owner's pause cancels a running extraction, and revoked
+learning or memory permission cancels it and any queued work. Extraction never
+falls back to `OPENAI_BASE_URL`. Without a usable endpoint, extraction is shown
+as unavailable and manual authoring still works. An extracted lesson is only ever
+a pending or quarantined proposal, and it cannot activate without review.
+
 ## Development checks
 
 ```sh
