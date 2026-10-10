@@ -17,10 +17,12 @@ import {
   ConversationStore,
   type AdmittedRunSource,
   type ConversationRun,
+  type LearningJobCandidate,
   type MessageRole,
   type RunStatus,
   type ServerTurnSource,
 } from './conversation-store.js';
+import { detectLearningCandidate } from './learning.js';
 
 const RESTART_INTERRUPT_REASON =
   'Run interrupted because the server process restarted. Review completed effects before retrying.';
@@ -500,7 +502,7 @@ export class ConversationRunner extends AgentRunner {
       const reason = active.stopRequested
         ? STOP_INTERRUPT_REASON
         : (errorMessage ?? null);
-      this.store.finishRun(run.id, status, reason);
+      this.completeRun(run, status, reason);
       if (!sawTerminalEvent)
         subject.next(
           this.terminalEvent(threadId, request.input.runId, status, reason),
@@ -520,6 +522,34 @@ export class ConversationRunner extends AgentRunner {
     } finally {
       this.active.delete(threadId);
       subject.complete();
+    }
+  }
+
+  /**
+   * Commits the terminal status and, for a completed run, at most one learning
+   * job in the same transaction. Detection reads committed rows only and never
+   * calls a model. If it fails, the turn still completes, just without a job.
+   */
+  private completeRun(
+    run: ConversationRun,
+    status: Exclude<RunStatus, 'running'>,
+    reason: string | null,
+  ) {
+    const candidate =
+      status === 'completed' ? this.learningCandidate(run.id) : null;
+    this.store.finishRunWithLearning(run.id, status, reason, candidate);
+  }
+
+  /**
+   * Detection reads the run as it is committed now. The `run` admitted above
+   * still holds the ordinal bounds from admission, not the ones the run grew to.
+   */
+  private learningCandidate(runId: string): LearningJobCandidate | null {
+    try {
+      const current = this.store.run(runId);
+      return current ? detectLearningCandidate(this.store, current) : null;
+    } catch {
+      return null;
     }
   }
 
