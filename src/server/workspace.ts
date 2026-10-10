@@ -1068,7 +1068,7 @@ export class WorkspaceStore {
     if (byteLength(safety) > LEARNING_LIMITS.safetyBytes)
       throw new Error('Learning safety findings exceed their size limit.');
     const safetyScanned =
-      input.safetyScanned ?? (input.createdBy === 'extractor');
+      input.safetyScanned ?? input.createdBy === 'extractor';
     if (input.createdBy === 'owner' && input.jobId)
       throw new Error('Owner-authored learning has no extraction job.');
     if (input.createdBy === 'extractor') {
