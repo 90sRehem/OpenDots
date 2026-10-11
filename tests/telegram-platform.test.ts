@@ -289,3 +289,49 @@ it('never sends Telegram notices for web conversation runs interrupted at boot',
   expect(sentMessages(calls)).toEqual([]);
   await shutdown(booted);
 }, 20000);
+it('aborts a pending getMe when the server stops instead of blocking shutdown', async () => {
+  vi.stubEnv('DO_NOT_TRACK', '1');
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+  let getMeStarted!: () => void;
+  const started = new Promise<void>((resolve) => (getMeStarted = resolve));
+  const methods: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const method = new URL(String(input)).pathname.split('/').pop() ?? '';
+      methods.push(method);
+      if (method === 'getMe') {
+        getMeStarted();
+        return new Promise<Response>((_resolve, reject) =>
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          ),
+        );
+      }
+      return new Promise<Response>(() => {});
+    }),
+  );
+  const booted = boot(tempDatabase(), telegram);
+  const start = booted.platform.start();
+  await started;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const platformStopped = booted.platform.stop();
+  await expect(
+    Promise.race([
+      platformStopped,
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('stop did not abort the pending getMe')),
+          2000,
+        );
+      }),
+    ]),
+  ).resolves.toBeUndefined();
+  clearTimeout(timer);
+  await start;
+  expect(methods).toContain('getMe');
+  booted.store.close();
+  booted.workspace.close();
+});

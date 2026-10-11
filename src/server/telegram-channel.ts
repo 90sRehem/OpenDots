@@ -56,7 +56,7 @@ export class TelegramChannel {
   #token: string;
   #allowedIds: ReadonlySet<string>;
   #stopped = false;
-  #controller?: AbortController;
+  #controller = new AbortController();
 
   constructor(
     token: string,
@@ -322,7 +322,7 @@ export class TelegramChannel {
               body: JSON.stringify(body),
             }
           : {}),
-        ...(this.#controller ? { signal: this.#controller.signal } : {}),
+        signal: this.#controller.signal,
       });
       if (!response.ok)
         throw Object.assign(new Error('Telegram request failed.'), {

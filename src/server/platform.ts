@@ -198,6 +198,7 @@ export class Platform {
     try {
       await channel.verify();
     } catch (error) {
+      if (this.shutdown.signal.aborted) return;
       this.telegramActivationFailed = true;
       reportChannelFailure(
         'Telegram activation failed; check TELEGRAM_BOT_TOKEN and network access',
