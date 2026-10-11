@@ -198,7 +198,11 @@ control local delivery:
   Turning it off stops their use without deleting them. Delivery also requires
   the workspace and Dot **Memory** permissions.
 - **Review lessons** opens the review screen, where the owner lists, reads,
-  writes, approves, rejects, edits, retires, and restores lessons.
+  writes, approves, rejects, edits, retires, and restores lessons. The owner can
+  also mark one of their own completed web-app turns and propose a lesson from
+  it. A lesson proposed from a turn or saved as an edit is scanned first: hard
+  findings refuse the save, and soft findings store it quarantined, where it
+  cannot be approved until the owner edits it.
 
 On each new turn, OpenDots adds the Dot's approved catalog to the system prompt
 and exposes the application-owned, read-only `load_local_skill` tool. The model

@@ -97,6 +97,13 @@ export const learningProposalSchema = z
   .object({ payload: learningPayloadSchema })
   .strict();
 
+/**
+ * Explicit owner marking: the owner's own lesson text, written from one completed
+ * turn. The text is the content, so no model forms it. The turn is named by the
+ * route, not the body.
+ */
+export const learningTurnProposalSchema = learningProposalSchema;
+
 /** Owner edit: the reviewed version the owner read, plus the replacement payload. */
 export const learningEditSchema = z
   .object({ review: learningReviewTokenSchema, payload: learningPayloadSchema })
@@ -121,6 +128,25 @@ export const LEARNING_VERSION_STATES = [
 export type LearningVersionStateName = (typeof LEARNING_VERSION_STATES)[number];
 
 /**
+ * One completed turn the owner can propose a lesson from. `excerpt` is the
+ * owner's own opening message, clipped; it is shown back to that owner only.
+ */
+export interface LearningTurnView {
+  runId: string;
+  conversationTitle: string;
+  startedAt: number;
+  excerpt: string;
+  /** True once this turn has produced its one owner proposal. */
+  marked: boolean;
+}
+
+export interface LearningTurnList {
+  available: boolean;
+  reason: string;
+  turns: LearningTurnView[];
+}
+
+/**
  * Wire shape of one learning version, as the owner screen receives it. `evidence`
  * and `payload` are the exact stored values; `evidenceHash` is what a review token
  * must echo back.
@@ -139,6 +165,7 @@ export interface LearningVersionView {
   createdBy: 'extractor' | 'owner';
   extractorPromptVersion: string;
   safetyFindings: SafetyFinding[];
+  safetyScanned: boolean;
   createdAt: number;
   reviewedAt: number | null;
   reviewedBy: string | null;

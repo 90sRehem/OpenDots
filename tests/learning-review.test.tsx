@@ -53,6 +53,7 @@ function version(overrides: Record<string, unknown> = {}) {
     createdBy: 'owner',
     extractorPromptVersion: 'owner-v1',
     safetyFindings: [],
+    safetyScanned: true,
     createdAt: 0,
     reviewedAt: null,
     reviewedBy: null,
@@ -96,6 +97,9 @@ function serve(
     usage?: Partial<typeof usage>;
     evidence?: unknown[];
     createdBy?: string;
+    safetyFindings?: unknown[];
+    safetyScanned?: boolean;
+    turns?: unknown;
   } = {},
 ) {
   const current = version({
@@ -103,6 +107,8 @@ function serve(
     evidence: opts.evidence ?? [],
     createdBy: opts.createdBy ?? 'owner',
     baseVersionId: opts.baseVersionId ?? null,
+    safetyFindings: opts.safetyFindings ?? [],
+    safetyScanned: opts.safetyScanned ?? true,
   });
   const activeVersionId = opts.active ? 'v1' : (opts.activeVersionId ?? null);
   const list = {
@@ -140,6 +146,8 @@ function serve(
   };
   api.mockImplementation(async (path: string) => {
     if (path === '/dots/dot1/learning') return list;
+    if (path === '/dots/dot1/learning/turns')
+      return opts.turns ?? { available: true, reason: '', turns: [] };
     if (path === '/dots/dot1/learning/versions/v1') return detail;
     throw new Error(`unexpected request ${path}`);
   });
@@ -210,6 +218,33 @@ it('shows the exact text, permissions, evidence, and that automatic suggestions 
   expect(text).toContain('Written by you. It cites no conversation messages.');
   expect(text).toContain('Waiting for review. It is not active');
   expect(text).toContain('Nothing is sent to Intelligence');
+});
+
+it('shows the stored safety findings for a scanned owner edit', async () => {
+  serve({
+    safetyScanned: true,
+    safetyFindings: [{ code: 'link', explanation: 'Contains a link.' }],
+  });
+  const renderer = await render();
+  const text = bodyText(renderer);
+  expect(text).toContain('link: Contains a link.');
+  expect(text).not.toContain('no automatic safety check ran');
+});
+
+it('never claims a safety scan for a version the scan did not run on', async () => {
+  serve({ safetyScanned: false });
+  const renderer = await render();
+  const text = bodyText(renderer);
+  expect(text).toContain('no automatic safety check ran');
+  expect(text).not.toContain('The safety check recorded no findings.');
+});
+
+it('records no findings only for a scanned version that had none', async () => {
+  serve({ safetyScanned: true, safetyFindings: [] });
+  const renderer = await render();
+  expect(bodyText(renderer)).toContain(
+    'The safety check recorded no findings.',
+  );
 });
 
 it('approves with the exact token the owner read, and offers approval only for a pending lesson', async () => {
@@ -484,4 +519,179 @@ it('offers restore for a retired lesson only when no other version is active', a
     buttonNamed(fresh, 'v1 · Retired').props.onClick();
   });
   expect(buttonsNamed(fresh, 'Restore after review')).toHaveLength(1);
+});
+
+// Propose from a completed turn: the owner picks a turn and writes the lesson.
+
+const openTurns = {
+  available: true,
+  reason: '',
+  turns: [
+    {
+      runId: 'run-1',
+      conversationTitle: 'Research notes',
+      startedAt: 0,
+      excerpt: 'Check the cited source before a claim.',
+      marked: false,
+    },
+  ],
+};
+
+/** Renders the screen without selecting a lesson, so the turn list is what's visible. */
+async function renderList() {
+  let renderer!: ReactTestRenderer;
+  await act(async () => {
+    renderer = create(
+      <LearningReview dot={dot} memoryAllowed onBack={() => {}} />,
+    );
+  });
+  return renderer;
+}
+
+/** Types into one lesson field, re-finding it so each change reads the latest draft. */
+async function fill(renderer: ReactTestRenderer, id: string, value: string) {
+  await act(async () => {
+    renderer.root
+      .find(
+        (node) =>
+          (node.type === 'input' || node.type === 'textarea') &&
+          node.props.id === `learning-${id}`,
+      )
+      .props.onChange({ target: { value } });
+  });
+}
+
+it('offers a native Propose a lesson action for each completed turn', async () => {
+  serve({ turns: openTurns });
+  const renderer = await renderList();
+  const action = buttonNamed(renderer, 'Propose a lesson');
+  // A native button is reachable and operable from the keyboard.
+  expect(action.props.type).toBe('button');
+  expect(action.props.disabled).toBeFalsy();
+  expect(bodyText(renderer)).toContain('Research notes');
+  expect(bodyText(renderer)).toContain(
+    'Check the cited source before a claim.',
+  );
+});
+
+it('proposes a lesson from the chosen turn, which is saved pending and is not active', async () => {
+  serve({ turns: openTurns });
+  const renderer = await renderList();
+  const reads = api.getMockImplementation()!;
+  const saved = version({
+    id: 'v9',
+    skillId: 's2',
+    slug: 'cite-before-claims',
+    state: 'pending',
+    createdBy: 'owner',
+    evidence: [],
+    payload: { ...payload, name: 'cite-before-claims' },
+  });
+  api.mockClear();
+  api.mockImplementation(async (path: string, method?: string) => {
+    if (path === '/dots/dot1/learning/runs/run-1/proposals') return saved;
+    if (path === '/dots/dot1/learning/versions/v9')
+      return {
+        version: saved,
+        replaces: null,
+        skill: {
+          id: 's2',
+          slug: 'cite-before-claims',
+          activeVersionId: null,
+          revision: 0,
+        },
+        review: {
+          versionId: 'v9',
+          contentHash: HASH,
+          evidenceHash: EVIDENCE_HASH,
+          expectedActiveVersionId: null,
+        },
+      };
+    return reads(path, method);
+  });
+
+  await act(async () => {
+    buttonNamed(renderer, 'Propose a lesson').props.onClick();
+  });
+  expect(bodyText(renderer)).toContain('Propose a lesson from this turn');
+  expect(bodyText(renderer)).toContain(
+    'Check the cited source before a claim.',
+  );
+  await fill(renderer, 'name', 'cite-before-claims');
+  await fill(renderer, 'description', 'Check the cited source before a claim.');
+  await fill(renderer, 'triggers', 'cite a source');
+  await fill(renderer, 'steps', 'Open the cited page.');
+  await fill(renderer, 'verification', 'Each claim names its source.');
+  await act(async () => {
+    renderer.root
+      .find((node) => node.type === 'form')
+      .props.onSubmit({ preventDefault() {} });
+  });
+
+  expect(api).toHaveBeenCalledWith(
+    '/dots/dot1/learning/runs/run-1/proposals',
+    'POST',
+    {
+      payload: expect.objectContaining({
+        name: 'cite-before-claims',
+        triggers: ['cite a source'],
+        steps: ['Open the cited page.'],
+      }),
+    },
+  );
+  const text = bodyText(renderer);
+  expect(text).toContain(
+    'Saved as a proposal from this turn. It is waiting for your review and is not active.',
+  );
+  expect(text).toContain(
+    'Waiting for review. It is not active and reaches no conversation until you approve it.',
+  );
+  expect(text).not.toContain('Active. ');
+});
+
+it('shows a turn that already produced a proposal without offering a second one', async () => {
+  serve({
+    turns: {
+      ...openTurns,
+      turns: [{ ...openTurns.turns[0], marked: true }],
+    },
+  });
+  const renderer = await renderList();
+  expect(buttonsNamed(renderer, 'Propose a lesson')).toHaveLength(0);
+  expect(bodyText(renderer)).toContain(
+    'A lesson was already proposed from this turn.',
+  );
+});
+
+it('says why no turn can be proposed when learning is off for the Dot', async () => {
+  const reason =
+    'Turn on Learn from future conversations for this Dot to propose a lesson from one of its turns.';
+  serve({ turns: { available: false, reason, turns: [] } });
+  const renderer = await renderList();
+  expect(buttonsNamed(renderer, 'Propose a lesson')).toHaveLength(0);
+  expect(bodyText(renderer)).toContain(reason);
+});
+
+it('disables turn proposals while the Dot is at its proposal limit', async () => {
+  serve({ turns: openTurns, usage: { pendingVersions: 10 } });
+  const renderer = await renderList();
+  expect(bodyText(renderer)).toContain(
+    'Full: this Dot has reached its limit of proposals waiting for review.',
+  );
+  expect(buttonNamed(renderer, 'Propose a lesson').props.disabled).toBe(true);
+});
+
+it('keeps the lessons on screen when the turn list fails to load', async () => {
+  serve();
+  const reads = api.getMockImplementation()!;
+  api.mockImplementation(async (path: string, method?: string) => {
+    if (path === '/dots/dot1/learning/turns')
+      throw new ApiError('Turn list failed.', 503);
+    return reads(path, method);
+  });
+  const renderer = await renderList();
+  expect(bodyText(renderer)).toContain(
+    'Could not load turns: Turn list failed.',
+  );
+  expect(buttonNamed(renderer, 'review-evidence')).toBeDefined();
 });

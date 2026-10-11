@@ -9,6 +9,7 @@ import {
   learningEditSchema,
   learningProposalSchema,
   learningReviewActionSchema,
+  learningTurnProposalSchema,
   validateLegacyLearningContainer,
   type LearningReviewToken,
   type LearningVersionView,
@@ -20,7 +21,11 @@ import {
   type LearningReviewCode,
   type LearningVersion,
 } from './workspace.js';
-import { learningExtractionStatus, learningReviewToken } from './learning.js';
+import {
+  learningExtractionStatus,
+  learningReviewToken,
+  scanLearningPayload,
+} from './learning.js';
 const dotSchema = z
   .object({
     name: z.string().trim().min(1).max(40),
@@ -47,6 +52,8 @@ const LEARNING_STATUS: Record<LearningReviewCode, 400 | 404 | 409> = {
   stale_active: 409,
   evidence_unverified: 409,
   capacity: 409,
+  ineligible_run: 409,
+  duplicate_run: 409,
 };
 function learningVersionView(
   version: LearningVersion,
@@ -66,6 +73,7 @@ function learningVersionView(
     createdBy: version.createdBy,
     extractorPromptVersion: version.extractorPromptVersion,
     safetyFindings: version.safetyFindings,
+    safetyScanned: version.safetyScanned,
     createdAt: version.createdAt,
     reviewedAt: version.reviewedAt,
     reviewedBy: version.reviewedBy,
@@ -279,6 +287,46 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       return learningFailure(c, error);
     }
   });
+  // Explicit owner marking (design report section 4.3, Explicit signal). The owner
+  // names one of their own completed turns and writes the lesson. The turn is
+  // checked by the store against the same eligibility rules as automatic
+  // proposals. The lesson is scanned, then stored pending for review, never active.
+  app.get('/dots/:id/learning/turns', (c) => {
+    const dot = platform.workspace.dot(c.req.param('id'));
+    if (!dot) return c.json({ error: 'Dot not found.' }, 404);
+    return c.json(platform.workspace.markableTurns(dot.id));
+  });
+  app.post('/dots/:id/learning/runs/:runId/proposals', async (c) => {
+    const dot = platform.workspace.dot(c.req.param('id'));
+    if (!dot) return c.json({ error: 'Dot not found.' }, 404);
+    const parsed = learningTurnProposalSchema.safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) return c.json({ error: LEARNING_FORM_ERROR }, 400);
+    const scan = scanLearningPayload(parsed.data.payload);
+    // Hard findings block storage. Soft findings store the lesson quarantined, which
+    // cannot be approved until the owner edits it into a new proposal.
+    if (scan.hard.length)
+      return c.json(
+        {
+          error: `This lesson was not saved. ${scan.hard.map((finding) => finding.explanation).join(' ')}`,
+          findings: scan.hard,
+        },
+        400,
+      );
+    try {
+      const version = platform.workspace.proposeFromRun({
+        dotId: dot.id,
+        runId: c.req.param('runId'),
+        payload: parsed.data.payload,
+        safetyFindings: scan.soft,
+        state: scan.soft.length ? 'quarantined' : 'pending',
+      });
+      return c.json(learningVersionView(version, version.payload.name), 201);
+    } catch (error) {
+      return learningFailure(c, error);
+    }
+  });
   app.post('/dots/:id/learning/versions/:versionId/edit', async (c) => {
     const dot = platform.workspace.dot(c.req.param('id'));
     if (!dot) return c.json({ error: 'Dot not found.' }, 404);
@@ -299,11 +347,26 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
         },
         400,
       );
+    const scan = scanLearningPayload(parsed.data.payload);
+    // Hard findings block storage. Soft findings store the edit quarantined, which
+    // cannot be approved until the owner edits it into a new proposal.
+    if (scan.hard.length)
+      return c.json(
+        {
+          error: `This edit was not saved. ${scan.hard.map((finding) => finding.explanation).join(' ')}`,
+          findings: scan.hard,
+        },
+        400,
+      );
     try {
       const edited = platform.workspace.proposeLearningEdit(
         dot.id,
         parsed.data.review,
         parsed.data.payload,
+        {
+          safetyFindings: scan.soft,
+          state: scan.soft.length ? 'quarantined' : 'pending',
+        },
       );
       return c.json(learningVersionView(edited, found.skill.slug), 201);
     } catch (error) {

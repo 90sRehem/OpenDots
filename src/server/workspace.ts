@@ -18,6 +18,8 @@ import {
   type LearningPayload,
   type LearningReviewToken,
   type LearningSignal,
+  type LearningTurnList,
+  type LearningTurnView,
   type SafetyFinding,
 } from '../shared/learning.js';
 import type { CallReceipt, Conversation, Dot, Space } from '../shared/types.js';
@@ -74,6 +76,10 @@ export const LEARNING_LIMITS = {
   versionRetentionMs: 90 * DAY_MS,
   /** A rejected skill slug is held back from automatic proposals for this long. */
   rejectionBlockMs: 30 * DAY_MS,
+  /** Newest eligible turns listed for owner marking. */
+  markableTurns: 20,
+  /** Owner text shown in a turn list, in characters. */
+  turnExcerptChars: 200,
 } as const;
 
 /** Provenance for versions the owner wrote or edited; no extractor ran for them. */
@@ -119,7 +125,9 @@ export type LearningReviewCode =
   | 'stale_base'
   | 'stale_active'
   | 'evidence_unverified'
-  | 'capacity';
+  | 'capacity'
+  | 'ineligible_run'
+  | 'duplicate_run';
 export class LearningReviewError extends Error {
   constructor(
     readonly code: LearningReviewCode,
@@ -159,6 +167,7 @@ export function applyLearningSchema(db: DatabaseSync) {
       extractorModel TEXT NULL,
       extractorPromptVersion TEXT NOT NULL,
       safetyFindings TEXT NOT NULL CHECK (json_valid(safetyFindings)),
+      safetyScanned INTEGER NOT NULL DEFAULT 0,
       createdAt INTEGER NOT NULL,
       reviewedAt INTEGER NULL,
       reviewedBy TEXT NULL,
@@ -208,6 +217,16 @@ export function applyLearningSchema(db: DatabaseSync) {
     BEGIN
       SELECT RAISE(ABORT, 'Learning version provenance is immutable.');
     END;`);
+  if (
+    !db
+      .prepare('PRAGMA table_info(learning_versions)')
+      .all()
+      .some((field) => field.name === 'safetyScanned')
+  )
+    db.exec(
+      `ALTER TABLE learning_versions ADD COLUMN safetyScanned INTEGER NOT NULL DEFAULT 0;
+       UPDATE learning_versions SET safetyScanned=1 WHERE createdBy='extractor';`,
+    );
 }
 
 /**
@@ -363,6 +382,7 @@ export interface LearningVersion {
   extractorModel: string | null;
   extractorPromptVersion: string;
   safetyFindings: SafetyFinding[];
+  safetyScanned: boolean;
   createdAt: number;
   reviewedAt: number | null;
   reviewedBy: string | null;
@@ -370,11 +390,17 @@ export interface LearningVersion {
 }
 type LearningVersionRow = Omit<
   LearningVersion,
-  'payload' | 'evidence' | 'safetyFindings'
-> & { payload: string; evidence: string; safetyFindings: string };
+  'payload' | 'evidence' | 'safetyFindings' | 'safetyScanned'
+> & {
+  payload: string;
+  evidence: string;
+  safetyFindings: string;
+  safetyScanned: number;
+};
 function toLearningVersion(row: LearningVersionRow): LearningVersion {
   return {
     ...row,
+    safetyScanned: row.safetyScanned === 1,
     payload: JSON.parse(row.payload) as LearningPayload,
     evidence: JSON.parse(row.evidence) as LearningEvidenceRecord[],
     safetyFindings: JSON.parse(row.safetyFindings) as SafetyFinding[],
@@ -397,12 +423,63 @@ export interface ProposeLearningVersionInput {
   payload: unknown;
   evidence: unknown[];
   safetyFindings?: unknown[];
+  safetyScanned?: boolean;
   state: 'pending' | 'quarantined';
   createdBy: 'extractor' | 'owner';
   jobId?: string | null;
   baseVersionId?: string | null;
   extractorModel?: string | null;
   extractorPromptVersion: string;
+}
+
+export interface ProposeFromRunInput {
+  dotId: string;
+  runId: string;
+  payload: LearningPayload;
+  safetyFindings: SafetyFinding[];
+  state: 'pending' | 'quarantined';
+}
+
+/** Owner learning needs the Dot to be opted in to learning and to allow memory. */
+function markingEnabled(dot: Dot): boolean {
+  return dot.learningEnabled === true && dot.memoryAllowed;
+}
+
+/**
+ * Why a completed turn cannot propose a lesson, or null when it can. Channel,
+ * voice, scheduled, failed, interrupted, unbounded (legacy) and not-enrolled
+ * turns are all refused. Owner marking adds no path around these rules.
+ */
+function markRefusal(
+  run: {
+    source: string;
+    status: string;
+    firstOrdinal: number | null;
+    lastOrdinal: number | null;
+    localLearningEnrolled: number;
+  },
+  dot: Dot,
+): string | null {
+  if (run.source !== 'web_owner')
+    return 'Only a turn you wrote in the web app can propose a lesson.';
+  if (run.status !== 'completed')
+    return 'Only a completed turn can propose a lesson.';
+  if (run.firstOrdinal === null || run.lastOrdinal === null)
+    return 'This turn has no recorded bounds, so it cannot propose a lesson.';
+  if (!run.localLearningEnrolled)
+    return 'This conversation did not opt into learning, so its turns cannot propose a lesson.';
+  if (!markingEnabled(dot))
+    return 'Learning is off for this Dot. Turn on Learn from future conversations to propose a lesson.';
+  return null;
+}
+
+/** The owner's opening message, collapsed to one line and clipped for a list. */
+function excerptOf(stored: string): string {
+  const parsed = JSON.parse(stored) as { content?: unknown };
+  const text = typeof parsed.content === 'string' ? parsed.content : '';
+  const flat = text.replace(/\s+/g, ' ').trim();
+  const max = LEARNING_LIMITS.turnExcerptChars;
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
 }
 
 export class WorkspaceStore {
@@ -717,6 +794,213 @@ export class WorkspaceStore {
       throw error;
     }
   }
+  /**
+   * Completed turns this owner may propose a lesson from, newest first. A turn
+   * shows only when it would pass the same rules `proposeFromRun` enforces.
+   */
+  markableTurns(dotId: string): LearningTurnList {
+    const dot = this.dot(dotId);
+    if (!dot) throw new LearningReviewError('not_found', 'Dot not found.');
+    if (!markingEnabled(dot))
+      return {
+        available: false,
+        reason:
+          'Turn on Learn from future conversations for this Dot to propose a lesson from one of its turns.',
+        turns: [],
+      };
+    const rows = this.db
+      .prepare(
+        `SELECT r.id AS runId, tb.title AS conversationTitle, r.startedAt AS startedAt,
+                m.content AS content,
+                EXISTS(SELECT 1 FROM learning_jobs j WHERE j.ownerId = tb.ownerId AND j.sourceRunId = r.id) AS marked
+         FROM conversation_runs r
+         JOIN thread_bindings tb ON tb.id = r.threadId
+         JOIN messages m ON m.threadId = r.threadId AND m.ordinal = r.firstOrdinal
+         WHERE tb.ownerId = ? AND tb.dotId = ? AND tb.localLearningEnrolled = 1
+           AND r.source = 'web_owner' AND r.status = 'completed'
+           AND r.firstOrdinal IS NOT NULL AND r.lastOrdinal IS NOT NULL
+           AND m.role = 'user'
+         ORDER BY r.startedAt DESC
+         LIMIT ?`,
+      )
+      .all(this.ownerId, dotId, LEARNING_LIMITS.markableTurns) as unknown as {
+      runId: string;
+      conversationTitle: string;
+      startedAt: number;
+      content: string;
+      marked: number;
+    }[];
+    const turns: LearningTurnView[] = rows.map((row) => ({
+      runId: row.runId,
+      conversationTitle: row.conversationTitle,
+      startedAt: Number(row.startedAt),
+      excerpt: excerptOf(row.content),
+      marked: !!row.marked,
+    }));
+    return {
+      available: true,
+      reason: turns.length
+        ? ''
+        : 'No completed turns yet. Only conversations started while Learn from future conversations was on can propose a lesson.',
+      turns,
+    };
+  }
+  /**
+   * Owner marking: stores one pending (or quarantined) lesson written from one
+   * completed turn. Eligibility, the single claim on the run and the proposal are
+   * written in one BEGIN IMMEDIATE transaction on this connection. The claim is
+   * a learning_jobs row in state `completed`, so the extraction worker never
+   * queues or claims it; it only holds the run's one owner proposal, using the
+   * same UNIQUE(ownerId, sourceRunId) that automatic proposals use. The version
+   * is owner-authored and still needs review before it becomes active.
+   */
+  proposeFromRun(input: ProposeFromRunInput): LearningVersion {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const version = this.insertFromRun(input);
+      this.db.exec('COMMIT');
+      return version;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+  private insertFromRun(input: ProposeFromRunInput): LearningVersion {
+    const dot = this.dot(input.dotId);
+    if (!dot) throw new LearningReviewError('not_found', 'Dot not found.');
+    // The thread's owner and Dot are read from canonical bindings, never the caller.
+    const run = this.db
+      .prepare(
+        `SELECT r.id, r.threadId, r.source, r.status, r.firstOrdinal, r.lastOrdinal,
+                tb.ownerId, tb.dotId, tb.localLearningEnrolled
+         FROM conversation_runs r JOIN thread_bindings tb ON tb.id = r.threadId
+         WHERE r.id = ?`,
+      )
+      .get(input.runId) as
+      | {
+          id: string;
+          threadId: string;
+          source: string;
+          status: string;
+          firstOrdinal: number | null;
+          lastOrdinal: number | null;
+          ownerId: string;
+          dotId: string;
+          localLearningEnrolled: number;
+        }
+      | undefined;
+    if (!run || run.ownerId !== this.ownerId || run.dotId !== input.dotId)
+      throw new LearningReviewError('not_found', 'Turn not found.');
+    const refusal = markRefusal(run, dot);
+    if (refusal) throw new LearningReviewError('ineligible_run', refusal);
+    const claimed = this.db
+      .prepare('SELECT 1 FROM learning_jobs WHERE ownerId=? AND sourceRunId=?')
+      .get(this.ownerId, run.id);
+    if (claimed)
+      throw new LearningReviewError(
+        'duplicate_run',
+        'This turn already has a lesson proposal.',
+      );
+    const opening = this.db
+      .prepare(
+        'SELECT id, ordinal, role, content FROM messages WHERE threadId=? AND ordinal=?',
+      )
+      .get(run.threadId, run.firstOrdinal) as
+      | { id: string; ordinal: number; role: string; content: string }
+      | undefined;
+    if (!opening || opening.role !== 'user')
+      throw new LearningReviewError(
+        'ineligible_run',
+        'This turn does not start with your message, so it cannot propose a lesson.',
+      );
+    // One explicit record: the owner's own message, cited by digest.
+    const evidence: LearningEvidenceRecord[] = [
+      {
+        threadId: run.threadId,
+        runId: run.id,
+        messageId: opening.id,
+        ordinal: opening.ordinal,
+        role: 'user',
+        sha256: sha256Hex(opening.content),
+        signal: 'explicit',
+      },
+    ];
+    const failure = canonicalEvidenceFailure(this.db, {
+      dotId: input.dotId,
+      signal: 'explicit',
+      sourceRunId: run.id,
+      evidence,
+    });
+    if (failure)
+      throw new LearningReviewError(
+        'evidence_unverified',
+        `The turn could not be verified (${failure}).`,
+      );
+    const payload = learningPayloadSchema.safeParse(input.payload);
+    if (!payload.success)
+      throw new LearningReviewError(
+        'invalid',
+        'Learning payload does not match its reviewed schema.',
+      );
+    const skill = this.db
+      .prepare(
+        'SELECT id, activeVersionId FROM learning_skills WHERE ownerId=? AND dotId=? AND slug=?',
+      )
+      .get(this.ownerId, input.dotId, payload.data.name) as
+      { id: string; activeVersionId: string | null } | undefined;
+    if (skill) {
+      const same = this.db
+        .prepare(
+          'SELECT version FROM learning_versions WHERE skillId=? AND contentHash=?',
+        )
+        .get(skill.id, learningPayloadHash(payload.data)) as
+        { version: number } | undefined;
+      if (same)
+        throw new LearningReviewError(
+          'state',
+          `This exact lesson already exists as version ${same.version}.`,
+        );
+    }
+    pruneLearning(this.db);
+    const jobs = this.db
+      .prepare('SELECT COUNT(*) AS n FROM learning_jobs')
+      .get() as { n: number };
+    if (Number(jobs.n) >= LEARNING_LIMITS.jobRows)
+      throw new LearningReviewError(
+        'capacity',
+        'Learning job capacity is full; retire or export old learning first.',
+      );
+    const now = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO learning_jobs (id, ownerId, dotId, threadId, sourceRunId, signal, state, evidence, sourceDigest, patternHash, consentRevision, lease, startedAt, finishedAt, reservedInputTokens, reservedOutputTokens, inputTokens, outputTokens, errorCode, createdAt)
+         VALUES (?, ?, ?, ?, ?, 'explicit', 'completed', ?, ?, NULL, ?, NULL, NULL, ?, 0, 0, NULL, NULL, NULL, ?)`,
+      )
+      .run(
+        randomUUID(),
+        this.ownerId,
+        input.dotId,
+        run.threadId,
+        run.id,
+        canonicalJson(evidence),
+        learningEvidenceHash(evidence),
+        this.learningRevision(input.dotId),
+        now,
+        now,
+      );
+    return this.insertLearningVersion({
+      dotId: input.dotId,
+      slug: payload.data.name,
+      payload: payload.data,
+      evidence,
+      safetyFindings: input.safetyFindings,
+      safetyScanned: true,
+      state: input.state,
+      createdBy: 'owner',
+      baseVersionId: skill?.activeVersionId ?? null,
+      extractorPromptVersion: OWNER_PROMPT_VERSION,
+    });
+  }
   learningSkills(dotId: string): LearningSkill[] {
     return this.db
       .prepare(
@@ -783,6 +1067,8 @@ export class WorkspaceStore {
     const safety = canonicalJson(safetyParsed.data);
     if (byteLength(safety) > LEARNING_LIMITS.safetyBytes)
       throw new Error('Learning safety findings exceed their size limit.');
+    const safetyScanned =
+      input.safetyScanned ?? input.createdBy === 'extractor';
     if (input.createdBy === 'owner' && input.jobId)
       throw new Error('Owner-authored learning has no extraction job.');
     if (input.createdBy === 'extractor') {
@@ -884,6 +1170,7 @@ export class WorkspaceStore {
       extractorModel: input.extractorModel ?? null,
       extractorPromptVersion: input.extractorPromptVersion,
       safetyFindings: safetyParsed.data,
+      safetyScanned,
       createdAt: Date.now(),
       reviewedAt: null,
       reviewedBy: null,
@@ -891,7 +1178,7 @@ export class WorkspaceStore {
     };
     this.db
       .prepare(
-        'INSERT INTO learning_versions (id, skillId, version, baseVersionId, state, payload, contentHash, evidence, createdBy, jobId, extractorModel, extractorPromptVersion, safetyFindings, createdAt, reviewedAt, reviewedBy, reviewNote) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)',
+        'INSERT INTO learning_versions (id, skillId, version, baseVersionId, state, payload, contentHash, evidence, createdBy, jobId, extractorModel, extractorPromptVersion, safetyFindings, safetyScanned, createdAt, reviewedAt, reviewedBy, reviewNote) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL)',
       )
       .run(
         version.id,
@@ -907,6 +1194,7 @@ export class WorkspaceStore {
         version.extractorModel,
         version.extractorPromptVersion,
         safety,
+        version.safetyScanned ? 1 : 0,
         version.createdAt,
       );
     return version;
@@ -985,6 +1273,7 @@ export class WorkspaceStore {
     dotId: string,
     token: LearningReviewToken,
     payload: unknown,
+    scan: { safetyFindings: SafetyFinding[]; state: 'pending' | 'quarantined' },
   ): LearningVersion {
     const parsed = learningReviewTokenSchema.safeParse(token);
     if (!parsed.success)
@@ -1006,7 +1295,9 @@ export class WorkspaceStore {
         slug: skill.slug,
         payload,
         evidence: version.evidence,
-        state: 'pending',
+        safetyFindings: scan.safetyFindings,
+        safetyScanned: true,
+        state: scan.state,
         createdBy: 'owner',
         baseVersionId: skill.activeVersionId,
         extractorPromptVersion: OWNER_PROMPT_VERSION,

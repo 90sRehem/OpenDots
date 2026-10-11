@@ -1236,6 +1236,7 @@ export async function runLearningExtraction(
         extractorModel: deps.model,
         extractorPromptVersion: LEARNING_EXTRACTOR_PROMPT_VERSION,
         safetyFindings: findings.soft,
+        safetyScanned: true,
       }).id;
     } catch {
       return finish('failed', 'store_refused');
