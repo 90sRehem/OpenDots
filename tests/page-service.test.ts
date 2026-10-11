@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import { PageService } from '../src/server/page-service.js';
 import { pageAccess } from '../src/server/page-tools.js';
-it('reuses one actual Intelligence thread per page and Dot under concurrent requests', async () => {
+it('reuses one actual thread per page and Dot under concurrent requests', async () => {
   const ws = new WorkspaceStore(':memory:', 'owner');
   const dot = ws.dots()[0];
   const page = ws.pages.create(dot.spaceId, { title: 'Design' });
@@ -105,7 +105,7 @@ it('recovers the same reserved thread after a restart lease and a remote-success
   vi.restoreAllMocks();
   ws.close();
 });
-it('rejects a specialist in another Space before Intelligence is accessed', async () => {
+it('rejects a specialist in another Space before the thread store is accessed', async () => {
   const ws = new WorkspaceStore(':memory:', 'owner');
   const dot = ws.dots()[0];
   const space = ws.createSpace('Other', '');

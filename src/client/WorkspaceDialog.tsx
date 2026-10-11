@@ -312,7 +312,8 @@ export function WorkspaceDialog({
                 <legend>Automatic Learning</legend>
                 <p className="muted">
                   Lessons stay in this OpenDots database and are used only by
-                  this Dot. Nothing is sent to Intelligence.
+                  this Dot. They reach the model provider only in conversations
+                  with this Dot.
                 </p>
                 {dialog.dot ? (
                   <label className="permission-row">

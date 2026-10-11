@@ -756,7 +756,8 @@ export function LearningReview({
       </h3>
       <p className="muted">
         Lessons you approve are stored in this OpenDots database and used only
-        by this Dot. Nothing is sent to Intelligence.
+        by this Dot. They reach the model provider only in conversations with
+        this Dot.
       </p>
       {loadError && (
         <p role="alert" className="learning-alert">

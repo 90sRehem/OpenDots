@@ -34,7 +34,7 @@ function fixture(config: Record<string, unknown> = {}) {
   return { platform, workspace, conversationStore };
 }
 
-it('serves the SSE runtime and reports ready without Intelligence configuration', async () => {
+it('serves the SSE runtime and reports ready without any hosted configuration', async () => {
   const { platform } = fixture();
   const response = await platform.handle(
     new Request('http://localhost/api/copilotkit/info'),

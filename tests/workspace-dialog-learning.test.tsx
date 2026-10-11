@@ -8,7 +8,7 @@ import { WorkspaceDialog } from '../src/client/WorkspaceDialog';
 import type { Dot, State, WorkspaceState } from '../src/shared/types';
 
 // The Automatic Learning copy describes local delivery. It must not still ask the
-// owner to create a container in Intelligence or enable delivery there.
+// owner to create a hosted container or enable delivery there.
 
 const dot: Dot = {
   id: 'dot1',
@@ -55,7 +55,7 @@ function learningFieldset(markup: string) {
   return markup.slice(start, end);
 }
 
-it('describes local delivery and drops the Intelligence container for the Dot', () => {
+it('describes local delivery and drops the hosted container for the Dot', () => {
   const markup = renderToStaticMarkup(
     <WorkspaceDialog
       dialog={{ type: 'dot', dot, spaceId: 'space' }}
@@ -66,13 +66,15 @@ it('describes local delivery and drops the Intelligence container for the Dot', 
     />,
   );
   const fieldset = learningFieldset(markup);
-  expect(fieldset).toContain('Nothing is sent to Intelligence.');
+  expect(fieldset).toContain(
+    'They reach the model provider only in conversations with this Dot.',
+  );
   expect(fieldset).toContain('Use approved lessons');
   expect(fieldset).toContain('Learn from future conversations');
   expect(fieldset).toContain('Review lessons');
   expect(fieldset).not.toContain('container');
   expect(fieldset).not.toContain('Create this container');
-  expect(fieldset).not.toContain('Enable delivery in Intelligence');
+  expect(fieldset).not.toContain('Enable delivery');
   expect(fieldset).not.toContain('copilotkit.ai/learning');
   expect(fieldset).not.toContain('Set up Learning');
   expect(markup).not.toContain('learning-container');

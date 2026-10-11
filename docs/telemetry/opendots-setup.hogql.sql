@@ -1,4 +1,4 @@
--- Setup events are separate from Intelligence signup events.
+-- Setup events are separate from runtime request events.
 -- Browser abandonment is best-effort; activation means a successful answer.
 SELECT event,
        toString(properties.step) AS step,

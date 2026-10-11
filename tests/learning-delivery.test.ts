@@ -171,7 +171,7 @@ it('offers only the approved active catalog and loads one body through the read-
     expect(catalogRequest).toContain('Approved local skills for this turn');
     expect(afterLoad).toContain('sentinel-evidence-review-step');
     expect(chat).toHaveBeenCalledTimes(1);
-    // Delivery makes no Intelligence call and sends no Intelligence credential.
+    // Delivery makes no hosted-service call and sends no service credential.
     for (const [url] of network.mock.calls)
       expect(String(url)).toMatch(new RegExp(`^${MODEL_BASE}/`));
     expect(catalogRequest).not.toContain('intelligence');

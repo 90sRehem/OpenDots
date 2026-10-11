@@ -68,6 +68,29 @@ it('requires model setup and disables voice when the model is absent', () => {
   });
 });
 
+it('reports only the model, browser, voice, Telegram and missing fields, with no hosted flag', () => {
+  expect(Object.keys(setupStatus(declared)).sort()).toEqual([
+    'browser',
+    'missing',
+    'model',
+    'telegram',
+    'voice',
+  ]);
+  expect(setupStatus(model)).not.toHaveProperty('intelligence');
+});
+
+it('lists only the OpenAI requirements as missing when none are configured', () => {
+  expect(
+    setupStatus({ ...model, apiKey: undefined, model: undefined }).missing,
+  ).toEqual(['OPENAI_API_KEY', 'OPENAI_MODEL']);
+});
+
+it('reports voice ready from its OpenAI settings alone, with nothing else missing', () => {
+  expect(
+    setupStatus({ ...model, voiceKey: 'fixture', voiceModel: 'fixture' }),
+  ).toMatchObject({ voice: true, missing: [] });
+});
+
 it('does not list Telegram as missing, so its absence blocks nothing else', () => {
   expect(setupStatus(model).missing).toEqual([]);
   expect(setupStatus({ ...model, telegramBotToken: token }).missing).toEqual(

@@ -7,7 +7,7 @@ OpenDots is an application template under development, not a hosted service. The
 - Run local development on loopback.
 - Protect remote deployments with authentication and HTTPS.
 - Keep the browser service isolated from the application host and private networks. Do not expose its port publicly.
-- Keep Intelligence, model, speech, and browser credentials on the server. Never commit `.env` files or local databases.
+- Keep model, speech, and browser credentials on the server. Never commit `.env` files or local databases.
 - Treat page text, uploaded content, and model output as untrusted data, not authorization to change permissions.
 - Authorize every Space, Dot, and thread operation on the server. Map Slack actors explicitly; never treat a display name or client-supplied user ID as proof of identity.
 - Voice sessions must use scoped, short-lived credentials and route compute actions through the same permissions as text and Slack.

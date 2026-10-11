@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { PageError } from './pages.js';
 import type { ConversationStore } from './conversation-store.js';
 import type { WorkspaceStore } from './workspace.js';
-export interface PageIntelligence {
+export interface PageThreadStore {
   getOrCreateThread(input: {
     threadId: string;
     userId: string;
@@ -14,10 +14,10 @@ export interface PageIntelligence {
     userId: string;
   }): Promise<{ messages: { role: string; content?: unknown }[] }>;
 }
-export function localPageIntelligence(
+export function localPageThreadStore(
   workspace: WorkspaceStore,
   conversationStore: ConversationStore,
-): PageIntelligence {
+): PageThreadStore {
   return {
     getOrCreateThread: async ({ threadId, agentId, name }) => {
       const existing = workspace
@@ -51,7 +51,7 @@ async function bounded<T>(operation: Promise<T>): Promise<T> {
           () =>
             reject(
               new Error(
-                'Intelligence request timed out. Retry to recover the same conversation.',
+                'Page thread request timed out. Retry to recover the same conversation.',
               ),
             ),
           30000,
@@ -69,7 +69,7 @@ export class PageService {
   >();
   constructor(
     private workspace: WorkspaceStore,
-    private intelligence: () => PageIntelligence,
+    private threads: () => PageThreadStore,
   ) {}
   async conversation(spaceId: string, pageId: string, dotId: string) {
     const page = this.workspace.pages.get(spaceId, pageId);
@@ -85,7 +85,7 @@ export class PageService {
     const current = this.workspace.pages.thread(pageId, dotId);
     if (current?.ready)
       return this.workspace.requireThread(current.threadId, dotId);
-    const sdk = this.intelligence();
+    const sdk = this.threads();
     const task = (async () => {
       const candidateId = randomUUID();
       if (!this.workspace.pages.reserveThread(pageId, dotId, candidateId))
@@ -130,7 +130,7 @@ export class PageService {
     const thread = this.workspace.requireThread(threadId);
     const dot = this.workspace.dot(thread.dotId)!;
     const history = await bounded(
-      this.intelligence().getThreadMessages({
+      this.threads().getThreadMessages({
         threadId,
         userId: this.workspace.ownerId,
       }),

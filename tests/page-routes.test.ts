@@ -71,7 +71,7 @@ it('saves Learning settings through the owner API and rejects malformed containe
       )
     ).status,
   ).toBe(400);
-  // Local delivery no longer needs a legacy Intelligence container.
+  // Local delivery no longer needs a legacy hosted container.
   expect(
     (
       await app.request(
@@ -425,7 +425,7 @@ it.each([
   },
 );
 
-it('keeps real Intelligence failures as 503 without exposing details', async () => {
+it('keeps real page failures as 503 without exposing details', async () => {
   const { ws, app, platform } = fixture();
   ws.bindThread('valid-thread', ws.dots()[0].id, 'Conversation');
   vi.spyOn(platform.pages, 'saveConversation').mockRejectedValueOnce(
@@ -438,7 +438,7 @@ it('keeps real Intelligence failures as 503 without exposing details', async () 
   expect(response.status).toBe(503);
   expect(await response.json()).toEqual({
     error:
-      'Page operation could not complete. Check Intelligence setup or retry; your draft has not been discarded.',
+      'Page operation could not complete. Retry; your draft has not been discarded.',
   });
 });
 

@@ -1,6 +1,6 @@
 # Recorded walkthroughs
 
-Recorded from the local OpenDots app on September 29, 2026. The recordings use a dedicated `opendots` Intelligence project, a live `gpt-5.4-mini` model, and example content in a separate Launch studio Space. No customer data or credentials are shown.
+Recorded from the local OpenDots app on September 29, 2026. The recordings use a live `gpt-5.4-mini` model and example content in a separate Launch studio Space. No customer data or credentials are shown.
 
 | Recording                                    | Flow                                                                                | Duration   | Framing |
 | -------------------------------------------- | ----------------------------------------------------------------------------------- | ---------- | ------- |
@@ -37,7 +37,6 @@ The final recording was captured after correcting host-to-supervisor networking 
 ## What was verified
 
 - The provided model credential authenticated successfully.
-- A dedicated hosted Intelligence project and project-scoped runtime key were provisioned through the CopilotKit CLI.
 - Specialist chat returned a live model response.
 - The page assistant received the saved document context and returned relevant milestones.
 - The launch brief remained saved after a browser reload.
@@ -59,4 +58,4 @@ Calls stop microphone transmission and pause output immediately when ending, the
 
 ## Re-recording
 
-Use a separate example Space and specialist. Verify the model and Intelligence connection before recording. Keep Settings, environment files, credential pages, and unrelated windows out of the capture. Record the actual app, inspect every segment, and update the verification date and scope when replacing the assets. Never replace failed or missing responses with scripted output.
+Use a separate example Space and specialist. Verify the model connection before recording. Keep Settings, environment files, credential pages, and unrelated windows out of the capture. Record the actual app, inspect every segment, and update the verification date and scope when replacing the assets. Never replace failed or missing responses with scripted output.
