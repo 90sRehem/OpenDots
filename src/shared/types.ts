@@ -113,12 +113,13 @@ export interface CallReceipt {
   transcript: string;
   error: string | null;
 }
+export type TelegramStatus =
+  'not_configured' | 'setup_required' | 'online' | 'activation_failed';
 export interface SetupStatus {
-  intelligence: boolean;
   model: boolean;
   browser: boolean;
   voice: boolean;
-  slack: string;
+  telegram: TelegramStatus;
   missing: string[];
 }
 export interface WorkspaceState {

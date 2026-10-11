@@ -71,11 +71,7 @@ it('delivers learned skills from the local snapshot and never configures the SDK
     expect.objectContaining({ tools: [], forwardedProps: {} }),
   );
 });
-function fixture(
-  channel = true,
-  intelligenceKey: string | null = 'fixture',
-  channelLabel = 'Channel conversation',
-) {
+function fixture(channel = true, channelLabel = 'Channel conversation') {
   const store = new Store(':memory:');
   const workspace = new WorkspaceStore(':memory:', 'owner');
   databases.push(store, workspace);
@@ -86,13 +82,11 @@ function fixture(
     store,
     workspace,
     {
-      ...(intelligenceKey ? { intelligenceKey } : {}),
       apiKey: 'fixture',
       model: 'fixture',
       baseUrl: 'https://unused.invalid',
       runtimeUrl: '',
       voiceName: 'marin',
-      slackUsers: [],
     },
     dot.id,
     channel,
@@ -111,15 +105,15 @@ function fixture(
   return { agent, input, workspace, telemetry, dot };
 }
 
-it('runs with an API key and model when intelligenceKey is unset', async () => {
-  const f = fixture(false, null);
+it('runs with an API key and model alone', async () => {
+  const f = fixture(false);
   inner.run.mockReturnValue(of());
   await lastValueFrom(f.agent.run(f.input).pipe(toArray()));
   expect(inner.run).toHaveBeenCalledOnce();
 });
 
 it('binds a new channel thread using its supplied label', async () => {
-  const f = fixture(true, 'fixture', 'Telegram conversation');
+  const f = fixture(true, 'Telegram conversation');
   inner.run.mockReturnValue(of());
   await lastValueFrom(
     f.agent.run({ ...f.input, threadId: 'new-channel-thread' }).pipe(toArray()),
@@ -130,7 +124,7 @@ it('binds a new channel thread using its supplied label', async () => {
 });
 
 it('carries the channel label through clone()', async () => {
-  const f = fixture(true, 'fixture', 'Telegram conversation');
+  const f = fixture(true, 'Telegram conversation');
   inner.run.mockReturnValue(of());
   await lastValueFrom(
     f.agent

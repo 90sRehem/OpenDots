@@ -27,7 +27,6 @@ function fixture(config: Record<string, unknown> = {}) {
       baseUrl: 'https://example.com',
       runtimeUrl: '',
       voiceName: 'marin',
-      slackUsers: [],
       ...config,
     },
     conversationStore,
@@ -43,8 +42,8 @@ it('serves the SSE runtime and reports ready without Intelligence configuration'
   expect(response.status).toBe(200);
   expect((await response.json()).mode).toBe('sse');
   expect(platform.setup()).toMatchObject({
-    intelligence: false,
     model: true,
+    telegram: 'not_configured',
     missing: [],
   });
   expect(() => platform.requireReady()).not.toThrow();

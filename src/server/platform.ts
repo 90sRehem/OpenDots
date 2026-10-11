@@ -11,9 +11,11 @@ import { Store } from './store.js';
 import { WorkspaceStore } from './workspace.js';
 import { DotAgent } from './dot-agent.js';
 import { runThreadTurn } from './headless.js';
+import { reportChannelFailure, safeFailure } from './channel-errors.js';
+import { TelegramChannel } from './telegram-channel.js';
 import {
-  INTELLIGENCE_KEY_MISSING_LABEL,
   setupStatus,
+  telegramDeclared,
   type PlatformConfig,
 } from './platform-config.js';
 import { validateRuntimeScope } from './runtime-scope.js';
@@ -61,6 +63,10 @@ export class Platform {
   private readonly extraction: LearningExtractorReadiness;
   private readonly extractionCall?: ExtractionCall;
   private extractionLoop: Promise<void> = Promise.resolve();
+  private telegram?: TelegramChannel;
+  private telegramLoop: Promise<void> = Promise.resolve();
+  private telegramOnline = false;
+  private telegramActivationFailed = false;
   constructor(
     readonly store: Store,
     readonly workspace: WorkspaceStore,
@@ -142,22 +148,11 @@ export class Platform {
     );
   }
   setup() {
-    const status = setupStatus(
+    return setupStatus(
       this.config,
-      this.config.slackChannel ? 'setup_required' : 'not_configured',
+      this.telegramOnline,
+      this.telegramActivationFailed,
     );
-    const missing = status.missing.filter(
-      (item) => item !== INTELLIGENCE_KEY_MISSING_LABEL,
-    );
-    return {
-      ...status,
-      missing,
-      voice: !!(
-        this.config.voiceKey &&
-        this.config.voiceModel &&
-        !missing.length
-      ),
-    };
   }
   requireReady() {
     const missing = this.setup().missing;
@@ -168,14 +163,70 @@ export class Platform {
     this.setupTelemetry.start();
     if (this.extraction.state === 'ready')
       this.extractionLoop = this.runExtractionLoop();
+    this.telegramLoop = this.runTelegram().catch((error) =>
+      reportChannelFailure('Telegram connector failed', [safeFailure(error)]),
+    );
+  }
+  /**
+   * Starts the Telegram poll loop once getMe confirms the token. Nothing runs
+   * unless the token, owner, and Dot are configured, so an unconfigured
+   * connector never touches the network.
+   */
+  private async runTelegram(): Promise<void> {
+    const config = this.config;
+    if (!telegramDeclared(config)) return;
+    const dot = config.telegramDotId
+      ? this.workspace.dot(config.telegramDotId)
+      : this.workspace.dots()[0];
+    if (!dot) {
+      reportChannelFailure('Telegram not started', [
+        'No Dot is available; check TELEGRAM_DOT_ID.',
+      ]);
+      return;
+    }
+    const channel = new TelegramChannel(
+      config.telegramBotToken,
+      config.telegramOwnerId,
+      config.telegramAllowedIds ?? [],
+      this.conversationStore,
+      this.workspace,
+      (dotId) => this.dotAgent(dotId),
+      () => this.store.settings().paused,
+      config.telegramDotId,
+    );
+    this.telegram = channel;
+    try {
+      await channel.verify();
+    } catch (error) {
+      if (this.shutdown.signal.aborted) return;
+      this.telegramActivationFailed = true;
+      reportChannelFailure(
+        'Telegram activation failed; check TELEGRAM_BOT_TOKEN and network access',
+        [safeFailure(error)],
+      );
+      return;
+    }
+    // A stop that arrived while getMe was pending must not start polling.
+    if (this.shutdown.signal.aborted) return;
+    this.telegramOnline = true;
+    try {
+      await channel.start();
+    } catch (error) {
+      this.telegramOnline = false;
+      this.telegramActivationFailed = true;
+      reportChannelFailure('Telegram connector stopped', [safeFailure(error)]);
+    }
   }
   async stop() {
     // Each in-flight turn ends through `runner.stop`, so it is recorded
     // `interrupted` before the database closes. Nothing resumes it next start.
     this.shutdown.abort(new Error('Server is stopping.'));
+    this.telegram?.stop();
     await Promise.allSettled([...this.turns]);
     // The extraction loop stops its one call as `interrupted` before the store closes.
     await this.extractionLoop;
+    // The poll loop finishes the update it is handling, then exits.
+    await this.telegramLoop;
     await this.setupTelemetry.stop();
     this.conversationStore.close();
   }

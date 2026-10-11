@@ -1001,6 +1001,12 @@ export class ConversationStore {
       .run(outbound.id, threadId, runId, JSON.stringify(payload), now, now);
     return outbound;
   }
+  /** Whether a reply or notice was already queued for this run, so a restart does not repeat it. */
+  hasOutboundForRun(runId: string): boolean {
+    return !!this.db
+      .prepare('SELECT 1 FROM connector_outbound WHERE runId=? LIMIT 1')
+      .get(runId);
+  }
   outbound(id: string): ConnectorOutbound | undefined {
     const row = this.db
       .prepare('SELECT * FROM connector_outbound WHERE id=?')

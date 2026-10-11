@@ -167,7 +167,6 @@ it('protects the browser route with owner auth and origin guards and rejects for
       baseUrl: '',
       runtimeUrl: '',
       voiceName: 'marin',
-      slackUsers: [],
     },
     conversationStore,
   );

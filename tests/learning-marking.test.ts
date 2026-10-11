@@ -51,7 +51,6 @@ function marking(options: { ownerToken?: string; enable?: boolean } = {}) {
     {
       baseUrl: config.baseUrl,
       voiceName: 'marin',
-      slackUsers: [],
       runtimeUrl: '',
     },
     conversations,

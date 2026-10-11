@@ -1,10 +1,7 @@
 import { expect, it } from 'vitest';
 import { validateRuntimeScope } from '../src/server/runtime-scope.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
-import {
-  INTELLIGENCE_KEY_MISSING_LABEL,
-  setupStatus,
-} from '../src/server/platform-config.js';
+import { setupStatus } from '../src/server/platform-config.js';
 it('blocks unbound cross-Dot run and inspector routes before contacting Intelligence', () => {
   const store = new WorkspaceStore(':memory:', 'owner');
   const dot = store.dots()[0];
@@ -40,13 +37,11 @@ it('reports setup honestly without a standalone agent fallback', () => {
   const status = setupStatus({
     baseUrl: '',
     voiceName: 'marin',
-    slackUsers: [],
     runtimeUrl: '',
   });
-  expect(status.intelligence).toBe(false);
   expect(status.voice).toBe(false);
-  expect(status.slack).toBe('not_configured');
-  expect(status.missing).toContain(INTELLIGENCE_KEY_MISSING_LABEL);
+  expect(status.telegram).toBe('not_configured');
+  expect(status.missing).toEqual(['OPENAI_API_KEY', 'OPENAI_MODEL']);
 });
 it('rejects stop scope bypasses and misleading prefixes while allowing canonical owned routes', () => {
   const store = new WorkspaceStore(':memory:', 'owner');

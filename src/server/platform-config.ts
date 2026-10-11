@@ -1,26 +1,32 @@
 import type { WebConfig } from './parallel.js';
-import type { SetupStatus } from '../shared/types.js';
+import type { SetupStatus, TelegramStatus } from '../shared/types.js';
 
-// `copilotkit project select` writes the CLI name and deletes the template name.
-const INTELLIGENCE_API_KEY_ENV_NAMES = [
-  'CPK_INTELLIGENCE_API_KEY',
-  'INTELLIGENCE_API_KEY',
-] as const;
-export const INTELLIGENCE_KEY_MISSING_LABEL = `${INTELLIGENCE_API_KEY_ENV_NAMES[1]} (or ${INTELLIGENCE_API_KEY_ENV_NAMES[0]})`;
-
-export function intelligenceApiKeyFromEnv(
-  env: Record<string, string | undefined>,
-): string | undefined {
-  return firstNonEmptyEnvValue(env, INTELLIGENCE_API_KEY_ENV_NAMES);
+/** Telegram connector settings. The bot token is a server-side secret: never log it or send it to the browser. */
+export interface TelegramSettings {
+  telegramBotToken?: string;
+  telegramOwnerId?: string;
+  telegramAllowedIds?: string[];
+  telegramDotId?: string;
 }
 
-export function intelligenceWsUrlFromEnv(
-  env: Record<string, string | undefined>,
-): string | undefined {
-  return firstNonEmptyEnvValue(env, [
-    'INTELLIGENCE_GATEWAY_WS_URL',
-    'INTELLIGENCE_WS_URL',
-  ]);
+export interface PlatformConfig extends WebConfig, TelegramSettings {
+  model?: string;
+  apiKey?: string;
+  baseUrl: string;
+  /** A pinned loopback endpoint for local learning extraction. Never the chat provider. */
+  learningExtractorUrl?: string;
+  learningExtractorModel?: string;
+  computerSupervisorUrl?: string;
+  computerSupervisorToken?: string;
+  computerToken?: string;
+  computerNamespace?: string;
+  browserUrl?: string;
+  browserSecret?: string;
+  voiceKey?: string;
+  voiceModel?: string;
+  voiceName: string;
+  runtimeUrl: string;
+  ownerToken?: string;
 }
 
 /** The optional Exa key. It has no effect unless WEB_SEARCH_PROVIDER=exa selects Exa. */
@@ -66,60 +72,77 @@ function firstNonEmptyEnvValue(
   return undefined;
 }
 
-export interface PlatformConfig extends WebConfig {
-  intelligenceKey?: string;
-  intelligenceApiUrl?: string;
-  intelligenceWsUrl?: string;
-  model?: string;
-  apiKey?: string;
-  baseUrl: string;
-  /** A pinned loopback endpoint for local learning extraction. Never the chat provider. */
-  learningExtractorUrl?: string;
-  learningExtractorModel?: string;
-  computerSupervisorUrl?: string;
-  computerSupervisorToken?: string;
-  computerToken?: string;
-  computerNamespace?: string;
-  browserUrl?: string;
-  browserSecret?: string;
-  voiceKey?: string;
-  voiceModel?: string;
-  voiceName: string;
-  slackChannel?: string;
-  slackTeam?: string;
-  slackUsers: string[];
-  slackDotId?: string;
-  runtimeUrl: string;
-  ownerToken?: string;
+function trimmedOrUndefined(value: string | undefined): string | undefined {
+  return value?.trim() || undefined;
 }
+
+export function telegramConfigFromEnv(
+  env: Record<string, string | undefined>,
+): TelegramSettings {
+  return {
+    telegramBotToken: trimmedOrUndefined(env.TELEGRAM_BOT_TOKEN),
+    telegramOwnerId: trimmedOrUndefined(env.TELEGRAM_OWNER_ID),
+    telegramAllowedIds: (env.TELEGRAM_ALLOWED_IDS ?? '')
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+    telegramDotId: trimmedOrUndefined(env.TELEGRAM_DOT_ID),
+  };
+}
+
+function isTelegramUserId(value: string | undefined): value is string {
+  return !!value && /^\d+$/.test(value);
+}
+
+/** The token, owner id, and every allowed id are present and well formed, so the connector may start. */
+export function telegramDeclared(
+  config: PlatformConfig,
+): config is PlatformConfig & {
+  telegramBotToken: string;
+  telegramOwnerId: string;
+} {
+  return (
+    !!config.telegramBotToken &&
+    isTelegramUserId(config.telegramOwnerId) &&
+    (config.telegramAllowedIds ?? []).every(isTelegramUserId)
+  );
+}
+
+function telegramAnySetting(config: PlatformConfig): boolean {
+  return !!(
+    config.telegramBotToken ||
+    config.telegramOwnerId ||
+    config.telegramDotId ||
+    config.telegramAllowedIds?.length
+  );
+}
+
+export function telegramStatus(
+  config: PlatformConfig,
+  online = false,
+  activationFailed = false,
+): TelegramStatus {
+  if (telegramDeclared(config)) {
+    if (activationFailed) return 'activation_failed';
+    return online ? 'online' : 'setup_required';
+  }
+  return telegramAnySetting(config) ? 'setup_required' : 'not_configured';
+}
+
 export function setupStatus(
   config: PlatformConfig,
-  slack = 'not_configured',
-  activationFailed = false,
+  telegramOnline = false,
+  telegramActivationFailed = false,
 ): SetupStatus {
   const missing = [
-    !config.intelligenceKey && INTELLIGENCE_KEY_MISSING_LABEL,
     !config.apiKey && 'OPENAI_API_KEY',
     !config.model && 'OPENAI_MODEL',
   ].filter((item): item is string => !!item);
-  const declaredSlack = !!(
-    config.slackChannel &&
-    config.slackTeam &&
-    config.slackUsers.length
-  );
-  slack = declaredSlack
-    ? activationFailed && slack !== 'online'
-      ? 'activation_failed'
-      : slack
-    : config.slackChannel || config.slackTeam || config.slackUsers.length
-      ? 'setup_required'
-      : 'not_configured';
   return {
-    intelligence: !!config.intelligenceKey,
     model: !!(config.apiKey && config.model),
     browser: !!(config.browserUrl && config.browserSecret),
     voice: !!(config.voiceKey && config.voiceModel && !missing.length),
-    slack,
+    telegram: telegramStatus(config, telegramOnline, telegramActivationFailed),
     missing,
   };
 }

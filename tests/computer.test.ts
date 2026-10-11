@@ -54,7 +54,6 @@ function fixture(deadline = 1000) {
   const config = {
     baseUrl: 'https://example.com',
     voiceName: 'voice',
-    slackUsers: [],
     runtimeUrl: 'http://localhost',
     computerSupervisorUrl: 'http://127.0.0.1:4312',
     computerSupervisorToken: 'supervisor-secret',

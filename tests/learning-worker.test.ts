@@ -55,7 +55,6 @@ function platformFor(path: string, config: Partial<PlatformConfig> = {}) {
       baseUrl: 'https://api.openai.com/v1',
       runtimeUrl: '',
       voiceName: 'marin',
-      slackUsers: [],
       ...config,
     },
     stores.conversationStore,
@@ -129,8 +128,7 @@ describe('extraction worker', () => {
       'Remember this.',
     );
     const { platform } = platformFor(path, {
-      // Intelligence and chat-provider variables are present; they are not learning.
-      intelligenceKey: 'intelligence-key',
+      // A chat-provider key is present; it does not configure learning.
       apiKey: 'chat-key',
       baseUrl: 'https://api.openai.com/v1',
     });

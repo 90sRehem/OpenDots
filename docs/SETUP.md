@@ -1,6 +1,6 @@
 # Running the template
 
-OpenDots runs a React app and a Node server. The server stores pages, Space and Dot configuration, and thread bindings in SQLite and connects to your configured conversation, model, and messaging services.
+OpenDots runs a React app and a Node server. The server stores pages, Space and Dot configuration, and thread bindings in SQLite and connects to your configured model provider and messaging services.
 
 ## Local development
 
@@ -25,63 +25,18 @@ npm start
 
 Open http://127.0.0.1:4310. Keep the server running for background work.
 
-## Conversation services
+## Connection settings
 
-Text conversations need only a model provider: set `OPENAI_API_KEY` and `OPENAI_MODEL` in `.env` (see [Connection settings](#connection-settings)). CopilotKit Intelligence is optional and enables Slack and server-side voice or scheduled compute; choose local evaluation below, a licensed [self-hosted deployment](https://docs.copilotkit.ai/intelligence/self-hosting), or hosted Intelligence. See [Data and privacy](../README.md#data-and-privacy) for where conversation history and SQLite data are stored.
+Text conversations need only a model provider. Edit `.env` on the server and restart after changes:
 
-### Hosted Intelligence
-
-To get a hosted project key, run these commands in the OpenDots folder after `cp .env.example .env`:
-
-```sh
-npx copilotkit@latest login
-npx copilotkit@latest project select
-```
-
-`login` opens the browser to sign in or create an account. `project select` lets you select or create a project, and writes a project-scoped key to `.env` as `CPK_INTELLIGENCE_API_KEY`. Keep the generated `CPK_TELEMETRY_ID` together with the project key when deploying, including Docker. It connects SDK telemetry to the selected Intelligence account; see [signup and usage tracking](TELEMETRY.md). It removes an `INTELLIGENCE_API_KEY` line, so that the file holds one credential. Use the same project for Slack below.
-
-Do not run `copilotkit onboard` in this folder. Onboarding is for apps that do not have CopilotKit yet. OpenDots already has its integration.
-
-### Local Intelligence evaluation
-
-The [local evaluation preview](https://docs.copilotkit.ai/intelligence/self-hosting-local) runs Intelligence in Docker Desktop on macOS. Allocate at least 4 CPUs, 12 GiB RAM, and 40 GiB free storage. OpenDots needs Node.js 24. A CopilotKit account is required; the free Developer plan qualifies for a renewable 30-day evaluation license. This is not a production installation.
-
-Run from the OpenDots folder after `cp .env.example .env`, with Docker Desktop running:
-
-```sh
-npx copilotkit@latest login
-npx copilotkit@latest local setup
-npx copilotkit@latest local connect
-npx copilotkit@latest local connect --approve-connection
-```
-
-`local connect` previews the changes; the approved command writes the local API URL, gateway WebSocket URL, and project key to `.env`. OpenDots accepts these directly. Do not run `project select` afterward: it selects a hosted project. Add `OPENAI_API_KEY` and `OPENAI_MODEL` for the app, then restart `npm run dev`.
-
-Send a message and verify it appears in the local dashboard (`npx copilotkit@latest local login`). Use `local status` to inspect service health. Threads and Channels are included; User Memory and Product Analytics are not. Channels require a public HTTPS address reachable by Slack or Teams.
-
-To restore the previous app connection, run `npx copilotkit@latest local cancel` and restart the app. This keeps the stack and its data. Use `local stop` to stop the stack, or `local renew` to renew its evaluation license. Existing hosted conversations are not copied into the local project.
-
-For this preview, run OpenDots directly on your Mac with `npm run dev`; Intelligence runs in Docker. The CLI's `localhost` URLs do not work from an OpenDots container. A containerized app needs an API address reachable from its container and a gateway address reachable from both the server and the browser, because the runtime advertises that gateway to browser clients. Changing the gateway to a Docker-only hostname is not sufficient.
-
-### Connection settings
-
-Edit `.env` on the server and restart after changes:
-
-| Variable                                             | Purpose                                                                  |
-| ---------------------------------------------------- | ------------------------------------------------------------------------ |
-| `INTELLIGENCE_API_KEY`                               | Project credential for CopilotKit Intelligence                           |
-| `INTELLIGENCE_API_URL`                               | API endpoint override for your Intelligence deployment                   |
-| `INTELLIGENCE_GATEWAY_WS_URL`, `INTELLIGENCE_WS_URL` | Gateway WebSocket override (CLI name preferred; legacy name supported)   |
-| `OPENAI_API_KEY`, `OPENAI_MODEL`                     | Model credential and model identifier                                    |
-| `OPENAI_BASE_URL`                                    | Compatible model API endpoint                                            |
-| `OWNER_ID`                                           | Stable identity used for this deployment's conversations                 |
-| `DATABASE_PATH`                                      | SQLite file containing pages, conversations, workspace and work metadata |
-| `OWNER_TOKEN`                                        | Application access token; required for external bindings                 |
-| `APP_ORIGIN`                                         | Comma-separated exact browser origins for a proxy or custom domain       |
-
-`npx copilotkit project select` deletes an `INTELLIGENCE_API_KEY` line and writes the same credential as `CPK_INTELLIGENCE_API_KEY`. The server reads either name. A non-empty `CPK_INTELLIGENCE_API_KEY` takes precedence over `INTELLIGENCE_API_KEY`.
-
-A non-empty `INTELLIGENCE_GATEWAY_WS_URL` takes precedence over `INTELLIGENCE_WS_URL`. Without either WebSocket override, OpenDots uses the hosted gateway. Set both the API and gateway endpoints when connecting a self-hosted deployment.
+| Variable                         | Purpose                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------ |
+| `OPENAI_API_KEY`, `OPENAI_MODEL` | Model credential and model identifier                                    |
+| `OPENAI_BASE_URL`                | Compatible model API endpoint                                            |
+| `OWNER_ID`                       | Stable identity used for this deployment's conversations                 |
+| `DATABASE_PATH`                  | SQLite file containing pages, conversations, workspace and work metadata |
+| `OWNER_TOKEN`                    | Application access token; required for external bindings                 |
+| `APP_ORIGIN`                     | Comma-separated exact browser origins for a proxy or custom domain       |
 
 The model environment variable names follow the configured provider adapter. Provider credentials belong in `.env`, not client-side variables or source code. See [Data and privacy](../README.md#data-and-privacy) for where conversation history and SQLite data are stored.
 
@@ -140,51 +95,65 @@ Use the same secret on the app and browser processes. Browser navigation is read
 
 For a separate browser, persistent files, and optional shell for each specialist, follow [Computer setup](COMPUTERS.md). This uses pinned OpenBot computer/supervisor services and per-Dot permissions. Search tools remain available alongside configured computer tools. With the browser provider selected, Dots use their computer tools in place of the read-only public-page tool; enable each Dot's required capabilities before use.
 
-## Slack
+## Telegram
 
-OpenDots uses `@copilotkit/channels` with a managed Slack connection, following the runtime and channel pattern in [OpenTag](https://github.com/CopilotKit/OpenTag). The application declares the channel and its specialist agent; Intelligence manages the Slack adapter and delivery. You do not need a separate Slack webhook server or Socket Mode connection in OpenDots.
+OpenDots connects to Telegram through the Bot API. The server polls Telegram from inside its own process, so no webhook, public address, or app review is needed. The bot answers one owner: that owner's private chat, plus any extra numeric user ids you allow. Group chats and channels are ignored.
 
-The CLI project-selection commands below are for hosted Intelligence. For local evaluation, configure Channels in the local dashboard and follow the [local Channels requirements](https://docs.copilotkit.ai/intelligence/self-hosting-local#connect-slack-or-microsoft-teams), including a public HTTPS address. Do not replace the local project key with `project select`.
+### Create the bot
 
-### Create the managed channel
+1. In Telegram, open [@BotFather](https://t.me/BotFather), send `/newbot`, and choose a display name and a username ending in `bot`.
+2. BotFather replies with a bot token shaped like `123456:ABC...`. Treat it as a password. Put it only in the server's `.env`. Do not paste it into chat, a browser, a screenshot, or a commit.
 
-Select the same Intelligence project used by this application, then create a uniquely named channel:
+### Find your numeric user id
 
-```sh
-npx --yes copilotkit@latest project select
-npx --yes copilotkit@latest channels add --name opendots --display-name "OpenDots" --adapter slack --json
-```
+`TELEGRAM_OWNER_ID` is your numeric Telegram user id, not your username or phone number. Find it before starting OpenDots, because the connector and these lookups read the same update queue:
 
-Follow the CLI's returned `nextAction` to create the Slack app from its generated manifest, supply credentials through the managed setup flow, and run its `resumeCommand`. A `blocked` response means a Slack-console step is still needed; a `failed` response must be resolved before continuing. Keep Socket Mode off. Install or reinstall the generated app in your workspace with its requested scopes. Use a distinct channel name for separate deployments so they do not compete for deliveries.
+- Message a "get my id" bot, which replies with your id, or
+- Send any message to your new bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser and read `message.from.id`. That URL contains the token, so do not share it.
 
-See [OpenTag's setup guide](https://github.com/CopilotKit/OpenTag/blob/main/setup.md) for the Slack-console walkthrough. Slack bot tokens and signing secrets belong in the managed adapter configuration, not the browser or this application's `.env`.
+### Configure OpenDots
 
-### Connect a specialist
-
-Configure the application server's `.env` alongside its Intelligence and model credentials:
+Set these in the server's `.env`:
 
 ```dotenv
-SLACK_CHANNEL_NAME=opendots
-SLACK_TEAM_ID=T_REPLACE_WITH_WORKSPACE_ID
-SLACK_USER_IDS=U_REPLACE_WITH_YOUR_USER_ID
-SLACK_DOT_ID=REPLACE_WITH_DOT_ID
+TELEGRAM_BOT_TOKEN=123456:REPLACE_WITH_BOTFATHER_TOKEN
+TELEGRAM_OWNER_ID=REPLACE_WITH_YOUR_NUMERIC_ID
+TELEGRAM_ALLOWED_IDS=
+TELEGRAM_DOT_ID=
 ```
 
-`SLACK_CHANNEL_NAME` must exactly match the managed channel name, not a Slack conversation name such as `#general`. OpenTag calls this setting `INTELLIGENCE_CHANNEL_NAME`; OpenDots uses `SLACK_CHANNEL_NAME`. `SLACK_TEAM_ID` and the comma-separated `SLACK_USER_IDS` restrict who may invoke the specialist. `SLACK_DOT_ID` selects an existing Dot; find IDs in the authenticated `/api/workspace` response. If omitted, it defaults to the initial Dot.
+| Variable               | Purpose                                                                                                          |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN`   | Bot token from BotFather. Required with the owner id. A server-side secret: never logged or sent to the browser. |
+| `TELEGRAM_OWNER_ID`    | Required. The owner's numeric Telegram user id.                                                                  |
+| `TELEGRAM_ALLOWED_IDS` | Optional. Extra numeric Telegram user ids, comma-separated.                                                      |
+| `TELEGRAM_DOT_ID`      | Optional. An existing Dot id, from the authenticated `/api/workspace` response. Defaults to the first Dot.       |
 
-Restart OpenDots after changing environment settings and inspect Slack status in Settings & setup. Channel activation must complete before trying a message. Mention the installed bot in a channel it can access; subsequent messages in that followed thread go to the same specialist. Unrelated threads, bot events, edits, deletions, and users outside the allowlist do not start agent runs. Editing a message to add a mention is not supported; send a new message instead.
+Restart OpenDots after changing these settings. Settings & setup shows the Telegram status:
 
-This template maps permitted Slack users to the single OpenDots owner. Replies are visible to the Slack conversation's audience, so choose the specialist's Space access and permitted tools accordingly. This is not a multi-user identity model.
+- **not configured**: no Telegram variable is set. Nothing else is affected.
+- **setup required**: a variable is missing or malformed, or the connector has not started yet.
+- **online**: Telegram confirmed the token and the connector is polling.
+- **activation failed**: Telegram rejected the token or could not be reached. Check the token and network access, then restart.
+
+### Conversation behavior
+
+Only a private chat from the owner or an allowed user can start an agent run. Everything else is dropped without a reply: group messages, edited messages, channel posts, bot senders, and anyone not listed. Each private chat is one local conversation bound to the selected Dot, and it continues across restarts. If OpenDots stops during a reply, the owner receives a notice asking them to resend. After a restart, polling resumes from the stored position, so updates that were already handled are not replayed.
+
+Telegram bot chats are not end-to-end encrypted, and replies are visible to anyone who can read the chat. The template maps every permitted Telegram user to the single OpenDots owner. It is not a multi-user identity model.
 
 ### Verify your deployment
 
-From an allowed user, mention the bot and verify a response in the same Slack thread. Reply in that thread and confirm continuity. Check that an unrelated thread and an unapproved user cannot invoke it. Pause the assistant in OpenDots and verify that a permitted request receives a paused notice. Check Settings & setup for channel connection failures.
+1. From the owner's account, send a message to the bot. Expect a reply in the same chat. This needs `OPENAI_API_KEY` and `OPENAI_MODEL`.
+2. From an account that is not `TELEGRAM_OWNER_ID` or in `TELEGRAM_ALLOWED_IDS`, message the bot. Expect no reply and no new conversation in OpenDots.
+3. Add the bot to a group and message it there. Expect no reply.
+4. Restart OpenDots, then send another message from the owner's account. The reply should continue the same conversation without a resend notice.
 
-Local tests exercise channel behavior with fixtures. A live Slack mention/reply remains unverified until you provision the managed connection and model credentials. [Channels SDK documentation](https://github.com/CopilotKit/channels-sdk) describes extending the adapter and channel behavior.
+Automated tests exercise the connector with fixtures. These steps need your own bot token and a live Telegram account, so they are not covered by `npm test`.
 
 ## Calls
 
-The included speech adapter uses the Realtime API at `api.openai.com`. Set `VOICE_API_KEY` to a key with access to that API and `VOICE_MODEL` to a supported Realtime model (the local UI test used `gpt-realtime-2.1`); `VOICE_NAME` selects the voice. `OPENAI_BASE_URL` changes the compute model endpoint only, not speech. Calls use browser microphone access and WebRTC. Hosted deployments need HTTPS. The server mediates provider setup and delegates compute to the selected Dot's conversation.
+The included speech adapter uses the Realtime API at `api.openai.com`. Set `VOICE_API_KEY` to a key with access to that API and `VOICE_MODEL` to a supported Realtime model (the local UI test used `gpt-realtime-2.1`); `VOICE_NAME` selects the voice. `OPENAI_BASE_URL` changes the compute model endpoint only, not speech. Calls use browser microphone access and WebRTC. Deployments reached over a network need HTTPS. The server mediates provider setup and delegates compute to the selected Dot's conversation.
 
 A configured key is not evidence of a successful call. Verify microphone access, audio playback, compute delegation, interruption, hangup, and the saved receipt with your deployment before relying on voice workflows.
 
@@ -196,21 +165,21 @@ Set `OWNER_TOKEN` and `BROWSER_SECRET` to different random secrets of at least 2
 docker compose up --build -d
 ```
 
-Open http://localhost:4310. The app port binds to loopback. The browser service is optional: set a 24+ character `BROWSER_SECRET` and run `docker compose --profile browser up --build` to enable it; it has no published port. Application metadata lives in the `opendots-data` volume.
+Open http://localhost:4310. The app port binds to loopback. The browser service is optional: set a 24+ character `BROWSER_SECRET` and run `docker compose --profile browser up --build` to enable it; it has no published port. Application metadata lives in the `opendots-data` volume. The bundled compose file forwards the `TELEGRAM_*` settings from `.env`, so the connector runs in the container when they are set.
 
 ```sh
 # Stop services while retaining saved data.
 docker compose down
 ```
 
-For remote hosting, configure an HTTPS reverse proxy and the matching `APP_ORIGIN`. See [Security](../SECURITY.md) for the template's deployment boundary.
+For remote access, configure an HTTPS reverse proxy and the matching `APP_ORIGIN`. See [Security](../SECURITY.md) for the template's deployment boundary.
 
 ## Automatic Learning
 
 Automatic Learning runs locally. Lessons are stored in the local OpenDots
-database, and nothing is sent to Intelligence. The workspace database stores
+database, and nothing is sent to a remote service. The workspace database stores
 proposed skills, each version's review state, and the approved library a Dot
-delivers. No Intelligence credential or remote skill catalog is on the delivery
+delivers. No remote skill catalog or external credential is on the delivery
 path.
 
 Each Dot owns its library. The **Automatic Learning** settings in the Dot dialog
@@ -245,7 +214,8 @@ active. OpenDots does not automatically approve skills.
 
 Conversation learning enrollment is fixed when the conversation is created;
 existing conversations are not enrolled retroactively. This applies to page chat,
-scheduled and voice compute in those conversations, and new Slack threads.
+scheduled and voice compute in those conversations, and new Telegram
+conversations.
 Existing research, memory, page, and computer permissions still apply. Ingestion
 and delivery are separate: turning off delivery does not stop evidence
 collection. When delivery is off, the turn continues without a catalog.
@@ -296,4 +266,4 @@ npm test
 npm run build
 ```
 
-Automated tests use service fixtures. Live model, Intelligence, Slack, and voice verification requires your own configured services.
+Automated tests use service fixtures. Live model, Telegram, and voice verification requires your own configured services and bot token.

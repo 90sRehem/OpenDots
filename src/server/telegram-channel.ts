@@ -8,9 +8,11 @@ import {
 import { lastValueFrom, toArray } from 'rxjs';
 import { safeFailure } from './channel-errors.js';
 import { ConversationStore } from './conversation-store.js';
+import { RESTART_INTERRUPT_REASON } from './conversation-runner.js';
 import { WorkspaceStore } from './workspace.js';
 
 const PLATFORM = 'telegram';
+const THREAD_PREFIX = 'telegram-';
 const MAX_OUTBOUND_ATTEMPTS = 3;
 const INTERRUPTED_NOTICE =
   'A previous run was interrupted. Please resend your message to continue.';
@@ -49,12 +51,12 @@ export function isEligibleTelegramUpdate(
   );
 }
 
-/** In-process long-poll Telegram connector. Configuration/startup wiring is owned by T11. */
+/** In-process long-poll Telegram connector, started and stopped by Platform. */
 export class TelegramChannel {
   #token: string;
   #allowedIds: ReadonlySet<string>;
   #stopped = false;
-  #controller?: AbortController;
+  #controller = new AbortController();
 
   constructor(
     token: string,
@@ -64,6 +66,8 @@ export class TelegramChannel {
     private readonly workspace: WorkspaceStore,
     private readonly agentFactory: TelegramAgentFactory,
     private readonly isPaused: () => boolean,
+    /** An existing Dot id; when omitted, the first Dot answers. */
+    private readonly dotId?: string,
   ) {
     this.#token = token;
     this.#allowedIds = new Set(allowedIds);
@@ -74,11 +78,21 @@ export class TelegramChannel {
     this.#controller?.abort();
   }
 
+  /** Confirms the bot token with getMe. Failures carry no token. */
+  async verify(): Promise<void> {
+    await this.request('getMe');
+  }
+
   async start(): Promise<void> {
     this.#stopped = false;
     this.#controller = new AbortController();
     await this.recoverInterruptedRuns();
-    while (!this.#stopped && !this.isPaused()) {
+    // A pause waits rather than ends the loop, so polling resumes on unpause.
+    while (!this.#stopped) {
+      if (this.isPaused()) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
+      }
       try {
         await this.pollOnce();
       } catch (error) {
@@ -130,7 +144,9 @@ export class TelegramChannel {
       return;
     }
 
-    const dot = this.workspace.dots()[0];
+    const dot = this.dotId
+      ? this.workspace.dot(this.dotId)
+      : this.workspace.dots()[0];
     if (!dot) {
       this.store.admitInbound(
         PLATFORM,
@@ -139,7 +155,7 @@ export class TelegramChannel {
       );
       return;
     }
-    const threadId = `telegram-${message.chat.id}`;
+    const threadId = `${THREAD_PREFIX}${message.chat.id}`;
     try {
       this.workspace.requireThread(threadId, dot.id);
     } catch {
@@ -223,15 +239,21 @@ export class TelegramChannel {
     }
   }
 
+  /**
+   * Tells the owner once per run that a Telegram turn was cut off by a restart.
+   * A run is owed a notice when this process finds it running, or when the
+   * process that owned it marked it interrupted at boot and nothing was queued.
+   * Web conversations are never notified here.
+   */
   private async recoverInterruptedRuns(): Promise<void> {
     for (const thread of this.workspace.conversations()) {
+      if (!thread.id.startsWith(THREAD_PREFIX)) continue;
       for (const run of this.store.runs(thread.id)) {
-        if (run.status !== 'running') continue;
-        this.store.finishRun(
-          run.id,
-          'interrupted',
-          'Run interrupted by process restart.',
-        );
+        if (run.status === 'running') {
+          this.store.finishRun(run.id, 'interrupted', RESTART_INTERRUPT_REASON);
+        } else if (!this.restartNoticeOwed(run)) {
+          continue;
+        }
         const outbound = this.store.queueOutbound(thread.id, run.id, {
           chat_id: Number(this.ownerId),
           text: INTERRUPTED_NOTICE,
@@ -241,6 +263,18 @@ export class TelegramChannel {
     }
     for (const outbound of this.store.pendingOutbound())
       await this.deliver(outbound.id);
+  }
+
+  private restartNoticeOwed(run: {
+    status: string;
+    error: string | null;
+    id: string;
+  }): boolean {
+    return (
+      run.status === 'interrupted' &&
+      run.error === RESTART_INTERRUPT_REASON &&
+      !this.store.hasOutboundForRun(run.id)
+    );
   }
 
   private async deliver(id: string): Promise<void> {
@@ -284,7 +318,7 @@ export class TelegramChannel {
               body: JSON.stringify(body),
             }
           : {}),
-        ...(this.#controller ? { signal: this.#controller.signal } : {}),
+        signal: this.#controller.signal,
       });
       if (!response.ok)
         throw Object.assign(new Error('Telegram request failed.'), {
