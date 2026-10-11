@@ -23,7 +23,6 @@ function fixture(ownerToken?: string) {
     {
       baseUrl: config.baseUrl,
       voiceName: 'marin',
-      slackUsers: [],
       runtimeUrl: '',
     },
     conversationStore,

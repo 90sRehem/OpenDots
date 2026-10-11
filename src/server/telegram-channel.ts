@@ -49,7 +49,7 @@ export function isEligibleTelegramUpdate(
   );
 }
 
-/** In-process long-poll Telegram connector. Configuration/startup wiring is owned by T11. */
+/** In-process long-poll Telegram connector, started and stopped by Platform. */
 export class TelegramChannel {
   #token: string;
   #allowedIds: ReadonlySet<string>;
@@ -64,6 +64,8 @@ export class TelegramChannel {
     private readonly workspace: WorkspaceStore,
     private readonly agentFactory: TelegramAgentFactory,
     private readonly isPaused: () => boolean,
+    /** An existing Dot id; when omitted, the first Dot answers. */
+    private readonly dotId?: string,
   ) {
     this.#token = token;
     this.#allowedIds = new Set(allowedIds);
@@ -74,11 +76,21 @@ export class TelegramChannel {
     this.#controller?.abort();
   }
 
+  /** Confirms the bot token with getMe. Failures carry no token. */
+  async verify(): Promise<void> {
+    await this.request('getMe');
+  }
+
   async start(): Promise<void> {
     this.#stopped = false;
     this.#controller = new AbortController();
     await this.recoverInterruptedRuns();
-    while (!this.#stopped && !this.isPaused()) {
+    // A pause waits rather than ends the loop, so polling resumes on unpause.
+    while (!this.#stopped) {
+      if (this.isPaused()) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        continue;
+      }
       try {
         await this.pollOnce();
       } catch (error) {
@@ -130,7 +142,9 @@ export class TelegramChannel {
       return;
     }
 
-    const dot = this.workspace.dots()[0];
+    const dot = this.dotId
+      ? this.workspace.dot(this.dotId)
+      : this.workspace.dots()[0];
     if (!dot) {
       this.store.admitInbound(
         PLATFORM,

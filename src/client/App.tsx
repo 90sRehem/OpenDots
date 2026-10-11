@@ -743,9 +743,9 @@ export function App() {
                   </div>
                   <div className="connection-note">
                     <span
-                      className={`online-dot ${workspace.setup.slack === 'online' ? '' : 'off'}`}
+                      className={`online-dot ${workspace.setup.telegram === 'online' ? '' : 'off'}`}
                     />
-                    Slack · {workspace.setup.slack.replaceAll('_', ' ')}
+                    Telegram · {workspace.setup.telegram.replaceAll('_', ' ')}
                     <button
                       className="text-button"
                       onClick={() => setDialog({ type: 'settings' })}

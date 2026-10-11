@@ -302,8 +302,15 @@ it('sends a single owner resend notice for an interrupted run, including across 
     () => new EchoAgent(),
     () => true,
   );
-  await stopped.start();
-  await stopped.start();
+  // A paused connector keeps its loop alive, so each start is ended after recovery.
+  const firstStart = stopped.start();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  stopped.stop();
+  await firstStart;
+  const secondStart = stopped.start();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  stopped.stop();
+  await secondStart;
   const notices = requests
     .filter(({ url }) => url.pathname.endsWith('/sendMessage'))
     .map(({ init }) => JSON.parse(String(init?.body)));
@@ -351,3 +358,71 @@ it.each(['getUpdates', 'sendMessage'])(
     expect(telemetry).not.toHaveBeenCalled();
   },
 );
+
+it('answers from the configured Dot when a Dot id is supplied', async () => {
+  const f = fixture();
+  const first = f.workspace.dots()[0];
+  const second = f.workspace.createDot(
+    first.spaceId,
+    'Second',
+    'Answer briefly.',
+    true,
+    true,
+  );
+  const connector = new TelegramChannel(
+    token,
+    '1001',
+    ['2002'],
+    f.store,
+    f.workspace,
+    f.agentFactory,
+    () => false,
+    second.id,
+  );
+  fakeTelegram([messageUpdate()]);
+  await connector.pollOnce();
+  expect(f.agentFactory).toHaveBeenCalledWith(second.id);
+  expect(f.workspace.requireThread('telegram-2002', second.id).dotId).toBe(
+    second.id,
+  );
+});
+
+it('keeps polling through a pause and resumes polling once unpaused', async () => {
+  const f = fixture();
+  let paused = true;
+  const connector = new TelegramChannel(
+    token,
+    '1001',
+    ['2002'],
+    f.store,
+    f.workspace,
+    f.agentFactory,
+    () => paused,
+  );
+  const methods: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const method = new URL(String(input)).pathname.split('/').pop() ?? '';
+      methods.push(method);
+      return new Promise<Response>((resolve, reject) => {
+        init?.signal?.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true },
+        );
+        if (method !== 'getUpdates')
+          resolve(Response.json({ ok: true, result: {} }));
+      });
+    }),
+  );
+  const running = connector.start();
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  expect(methods).toEqual([]);
+  paused = false;
+  await vi.waitFor(() => expect(methods).toContain('getUpdates'), {
+    timeout: 3000,
+  });
+  connector.stop();
+  await running;
+}, 15000);

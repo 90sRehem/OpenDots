@@ -11,8 +11,7 @@ import { WorkspaceStore } from './workspace.js';
 import { Platform } from './platform.js';
 import { ConversationStore } from './conversation-store.js';
 import {
-  intelligenceApiKeyFromEnv,
-  intelligenceWsUrlFromEnv,
+  telegramConfigFromEnv,
   type PlatformConfig,
 } from './platform-config.js';
 const host = process.env.HOST ?? '127.0.0.1';
@@ -32,9 +31,7 @@ const workspace = new WorkspaceStore(
   process.env.OWNER_ID ?? 'opendots-owner',
 );
 const config: PlatformConfig = {
-  intelligenceKey: intelligenceApiKeyFromEnv(process.env),
-  intelligenceApiUrl: process.env.INTELLIGENCE_API_URL || undefined,
-  intelligenceWsUrl: intelligenceWsUrlFromEnv(process.env),
+  ...telegramConfigFromEnv(process.env),
   apiKey: process.env.OPENAI_API_KEY,
   model: process.env.OPENAI_MODEL,
   baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
@@ -51,13 +48,6 @@ const config: PlatformConfig = {
   voiceKey: process.env.VOICE_API_KEY,
   voiceModel: process.env.VOICE_MODEL,
   voiceName: process.env.VOICE_NAME ?? 'marin',
-  slackChannel: process.env.SLACK_CHANNEL_NAME,
-  slackTeam: process.env.SLACK_TEAM_ID,
-  slackUsers: (process.env.SLACK_USER_IDS ?? '')
-    .split(',')
-    .map((value) => value.trim())
-    .filter(Boolean),
-  slackDotId: process.env.SLACK_DOT_ID || undefined,
   runtimeUrl: `http://${host === '::1' ? '[::1]' : '127.0.0.1'}:${port}/api/copilotkit`,
   ownerToken,
 };

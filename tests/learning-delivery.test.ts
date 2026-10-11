@@ -80,14 +80,11 @@ function agentFor(f: Fixture) {
     f.store,
     f.workspace,
     {
-      intelligenceKey: 'fixture',
-      intelligenceApiUrl: 'https://intelligence.invalid',
       apiKey: 'fixture',
       model: 'fixture',
       baseUrl: MODEL_BASE,
       runtimeUrl: '',
       voiceName: 'marin',
-      slackUsers: [],
     },
     f.dotId,
   );

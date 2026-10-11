@@ -42,7 +42,6 @@ const config: PlatformConfig = {
   voiceKey: 'voice-key',
   voiceModel: 'voice-model',
   voiceName: 'marin',
-  slackUsers: [],
 };
 
 function openDatabase() {
