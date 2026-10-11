@@ -250,11 +250,7 @@ export class TelegramChannel {
       if (!thread.id.startsWith(THREAD_PREFIX)) continue;
       for (const run of this.store.runs(thread.id)) {
         if (run.status === 'running') {
-          this.store.finishRun(
-            run.id,
-            'interrupted',
-            RESTART_INTERRUPT_REASON,
-          );
+          this.store.finishRun(run.id, 'interrupted', RESTART_INTERRUPT_REASON);
         } else if (!this.restartNoticeOwed(run)) {
           continue;
         }

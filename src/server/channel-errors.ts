@@ -1,5 +1,5 @@
 type Report = (operation: string, errors: string[]) => void;
-// Never pass provider messages/stacks to logs or Slack: they can contain credentials.
+// Never pass provider messages/stacks to logs or outbound channel messages: they can contain credentials.
 export function safeFailure(error: unknown): string {
   const name =
     error instanceof Error &&
