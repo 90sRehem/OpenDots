@@ -52,11 +52,37 @@ Use the conversation's save-to-page action to create a document from its saved t
 
 Back up the SQLite database: it contains page content, thread bindings, and conversation history. The template does not include multi-user page sharing, realtime collaboration, file uploads, or arbitrary interactive embeds.
 
-## Browser tool
+## Public-web search and browser reader
 
-Parallel is selected by default (`WEB_SEARCH_PROVIDER=parallel`). Live research needs the model configuration, but no browser worker. An optional server-side `PARALLEL_API_KEY` enables authenticated usage and higher limits. The anonymous MCP endpoint is free for light use. Queries, selected URLs, research objectives and a stable session identifier go to Parallel. See [public-web research](../README.md#public-web-research) for data sharing, permissions and limitations.
+Public-web search runs through a self-hosted [SearxNG](https://docs.searxng.org/) instance that you operate. Run it on loopback or a private host, enable its JSON output in `settings.yml`, then point OpenDots at it:
 
-Set `WEB_SEARCH_PROVIDER=disabled` to turn off these research tools, or `WEB_SEARCH_PROVIDER=browser` for the existing URL-only reader. The browser service reads a supplied public URL and returns page text and a capture. Configure `BROWSER_URL` and `BROWSER_SECRET`, then run:
+```yaml
+search:
+  formats:
+    - html
+    - json
+```
+
+```sh
+SEARXNG_URL=http://127.0.0.1:8080
+```
+
+OpenDots sends search queries only to `SEARXNG_URL` and returns result titles, snippets, and source URLs as citations. It does not fetch result pages, so search-based research works from snippets. Use the browser reader below to read one supplied page. Compose deployments must set `SEARXNG_URL` to an address the app container can reach. See [public-web research](../README.md#public-web-research) for data sharing, permissions and limitations.
+
+`WEB_SEARCH_PROVIDER` selects `searxng`, `exa`, `browser` (the URL-only reader), or `disabled`. When it is unset, OpenDots chooses `searxng` if `SEARXNG_URL` is set, `browser` if `BROWSER_URL` and `BROWSER_SECRET` are set, and `disabled` otherwise. Exa is never chosen automatically. With nothing configured, search reports itself unavailable and the rest of the app works normally. Selecting `searxng` without `SEARXNG_URL`, or `exa` without `EXA_API_KEY`, also reports search unavailable. The former third-party provider value `parallel` is rejected at startup.
+
+### Optional Exa search
+
+Exa is an opt-in third-party search provider. It is used only when you set both `WEB_SEARCH_PROVIDER=exa` and your own `EXA_API_KEY` on the server:
+
+```sh
+WEB_SEARCH_PROVIDER=exa
+EXA_API_KEY=your-exa-key
+```
+
+Search queries are sent to `https://api.exa.ai/search` with that key. Exa returns the same kind of result as SearxNG: titles, highlights, and source URLs, mapped to the same citation shape, so research output does not depend on the provider. Exa's page highlights are excerpts; OpenDots does not fetch the pages. Keep the key in `.env` only, never in client code or source control.
+
+The browser service reads a supplied public URL and returns page text and a capture. Configure `BROWSER_URL` and `BROWSER_SECRET`, then run:
 
 ```sh
 npx playwright install chromium
@@ -67,7 +93,7 @@ Use the same secret on the app and browser processes. Browser navigation is read
 
 ## Persistent Dot computers
 
-For a separate browser, persistent files, and optional shell for each specialist, follow [Computer setup](COMPUTERS.md). This uses pinned OpenBot computer/supervisor services and per-Dot permissions. Parallel research tools remain available alongside configured computer tools. With the browser provider selected, Dots use their computer tools in place of the read-only public-page tool; enable each Dot's required capabilities before use.
+For a separate browser, persistent files, and optional shell for each specialist, follow [Computer setup](COMPUTERS.md). This uses pinned OpenBot computer/supervisor services and per-Dot permissions. Search tools remain available alongside configured computer tools. With the browser provider selected, Dots use their computer tools in place of the read-only public-page tool; enable each Dot's required capabilities before use.
 
 ## Telegram
 

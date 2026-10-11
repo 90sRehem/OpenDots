@@ -1,4 +1,9 @@
-import { parallelSources } from './parallel.js';
+import {
+  isSearchEngine,
+  searchSources,
+  selectedWebSearchProvider,
+  webSearchUnavailableReason,
+} from './parallel.js';
 import { pageReviewTool } from '../shared/page-review.js';
 import { ComputerService } from './computer-service.js';
 import { computerTools } from './computer-tools.js';
@@ -149,7 +154,7 @@ export class DotAgent extends AbstractAgent {
         const tools: ToolDefinition[] =
           dot.researchAllowed &&
           initialSettings.researchAllowed &&
-          this.config.webSearchProvider === 'browser' &&
+          selectedWebSearchProvider(this.config) === 'browser' &&
           !computer.configured
             ? [
                 defineTool({
@@ -207,20 +212,18 @@ export class DotAgent extends AbstractAgent {
         if (
           dot.researchAllowed &&
           initialSettings.researchAllowed &&
-          (this.config.webSearchProvider ?? 'parallel') === 'parallel'
+          isSearchEngine(selectedWebSearchProvider(this.config)) &&
+          !webSearchUnavailableReason(this.config)
         ) {
           const capture = async (
             objective: string,
-            urls?: string[],
             searchQueries?: string[],
           ) => {
             const limitations: string[] = [];
             check();
-            const sources = await parallelSources(
+            const sources = await searchSources(
               {
                 objective,
-                urls,
-                sessionId: input.threadId,
                 searchQueries,
                 onWarning: (message) => limitations.push(message),
               },
@@ -249,7 +252,7 @@ export class DotAgent extends AbstractAgent {
             defineTool({
               name: 'search_web',
               description:
-                'Search public web sources and read relevant excerpts for a research question. Return source URLs for citations. Sends the question to Parallel.',
+                'Search public web sources through the configured search engine and return result snippets with source URLs for citations. Sends the question only to that configured engine.',
               parameters: z.object({
                 objective: z.string().min(1).max(4000),
                 search_queries: z
@@ -261,15 +264,7 @@ export class DotAgent extends AbstractAgent {
                   ),
               }),
               execute: ({ objective, search_queries }) =>
-                capture(objective, undefined, search_queries),
-            }),
-            defineTool({
-              name: 'read_public_page',
-              description:
-                'Extract source evidence from a public HTTP(S) URL with Parallel. No authenticated browsing or write actions.',
-              parameters: z.object({ url: z.string().url().max(2048) }),
-              execute: ({ url }) =>
-                capture('Read the page for relevant source evidence.', [url]),
+                capture(objective, search_queries),
             }),
           );
         }
