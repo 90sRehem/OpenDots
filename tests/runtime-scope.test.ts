@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import { validateRuntimeScope } from '../src/server/runtime-scope.js';
 import { WorkspaceStore } from '../src/server/workspace.js';
 import { setupStatus } from '../src/server/platform-config.js';
-it('blocks unbound cross-Dot run and inspector routes before contacting Intelligence', () => {
+it('blocks unbound cross-Dot run and inspector routes before running the agent', () => {
   const store = new WorkspaceStore(':memory:', 'owner');
   const dot = store.dots()[0];
   store.bindThread('thread-a', dot.id, 'A');

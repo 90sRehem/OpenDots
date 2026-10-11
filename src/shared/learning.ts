@@ -73,7 +73,7 @@ export const learningReviewTokenSchema = z
 export type LearningReviewToken = z.infer<typeof learningReviewTokenSchema>;
 
 /**
- * Legacy Intelligence container slug. Old rows and clients still validate
+ * Legacy hosted-container slug. Old rows and clients still validate
  * against it, but nothing uses it for ownership, eligibility, or delivery.
  */
 export const learningContainerIdSchema = z

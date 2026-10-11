@@ -24,7 +24,7 @@ import {
 } from './learning-extractor-fixtures.js';
 
 // Network-deny checks for local extraction: only the pinned loopback endpoint
-// is ever reached, redirects are refused, and no chat-provider or Intelligence
+// is ever reached, redirects are refused, and no chat-provider or hosted-service
 // traffic is generated, with those variables present or absent.
 
 const servers: LoopbackModel[] = [];
@@ -182,8 +182,8 @@ describe('pinned loopback transport', () => {
   });
 });
 
-describe('no Intelligence or cloud traffic', () => {
-  it('makes no learning request when the endpoint is unset, with or without Intelligence variables', async () => {
+describe('no hosted-service or cloud traffic', () => {
+  it('makes no learning request when the endpoint is unset', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     for (const url of [undefined, '']) {
       expect(learningExtractorReadiness(url, 'local-model')).toEqual({

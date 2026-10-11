@@ -217,7 +217,9 @@ it('shows the exact text, permissions, evidence, and that automatic suggestions 
   expect(text).toContain('Authorizing connected-service writes');
   expect(text).toContain('Written by you. It cites no conversation messages.');
   expect(text).toContain('Waiting for review. It is not active');
-  expect(text).toContain('Nothing is sent to Intelligence');
+  expect(text).toContain(
+    'They reach the model provider only in conversations with this Dot.',
+  );
 });
 
 it('shows the stored safety findings for a scanned owner edit', async () => {

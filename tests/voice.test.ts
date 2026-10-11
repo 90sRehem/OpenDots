@@ -178,14 +178,28 @@ it('defers paused transcript synchronization and resumes it once without a dupli
   expect(f.workspace.call(call.id).transcript).toBe(
     'Speech saved while paused',
   );
-  expect(f.workspace.call(call.id).error).toContain(
-    'pending Intelligence sync',
-  );
+  expect(f.workspace.call(call.id).error).toContain('pending receipt sync');
   f.store.updateSettings({ paused: false });
   await f.voice.resumePending();
   await f.voice.resumePending();
   expect(f.turn).toHaveBeenCalledTimes(1);
   expect(f.workspace.call(call.id).status).toBe('failed');
+});
+
+it('resumes a call whose pending notice was stored with the earlier wording', async () => {
+  const f = fixture();
+  const call = await f.voice.begin(
+    'thread',
+    offer,
+    new AbortController().signal,
+  );
+  f.workspace.setCallError(
+    call.id,
+    'Transcript saved locally; pending Intelligence sync until workspace resumes.',
+  );
+  await f.voice.resumePending();
+  expect(f.turn).toHaveBeenCalledTimes(1);
+  expect(f.workspace.call(call.id).error).toBeNull();
 });
 
 it('reports rejected provider hangup status without exposing its response body', async () => {

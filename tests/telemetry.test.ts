@@ -32,7 +32,6 @@ const workspace = new WorkspaceStore(':memory:', 'fixture-owner');
 const conversationStore = new ConversationStore(':memory:');
 try {
   const platform = new Platform(store, workspace, {
-    intelligenceKey: 'test-project-key-never-sent',
     baseUrl: '', runtimeUrl: '', voiceName: 'marin', slackUsers: [],
   }, conversationStore);
   const dot = workspace.dots()[0];
@@ -115,10 +114,7 @@ it('sends OpenDots runtime metadata with CLI identity and without the project ke
   expect(request?.headers['X-CopilotKit-Telemetry-Id']).toBe(
     'test-project-identity',
   );
-  expect(JSON.stringify(events)).not.toContain('test-project-key-never-sent');
-  expect(
-    events.some((event) => event.body.event === 'intelligence_signup'),
-  ).toBe(false);
+  expect(JSON.stringify(events)).not.toContain('_signup');
 });
 
 it.each([

@@ -1,4 +1,8 @@
 import type { Platform } from './platform.js';
+// Matches the pending-receipt notice. Calls that were already waiting carry the
+// earlier wording, which named a provider; the optional word keeps them resumable.
+const PENDING_RECEIPT_SYNC =
+  /pending (?:[A-Za-z]+ )?sync until workspace resumes/;
 export class VoiceService {
   private jobs = new Map<
     string,
@@ -229,7 +233,7 @@ export class VoiceService {
     if (this.platform.store.settings().paused) {
       this.platform.workspace.setCallError(
         id,
-        'Transcript saved locally; pending Intelligence sync until workspace resumes.',
+        'Transcript saved locally; pending receipt sync until workspace resumes.',
       );
       return;
     }
@@ -244,13 +248,13 @@ export class VoiceService {
     } catch {
       this.platform.workspace.setCallError(
         id,
-        'Call ended; its local receipt is saved, but Intelligence transcript sync failed.',
+        'Call ended; its local receipt is saved, but the transcript summary failed.',
       );
     }
   }
   async resumePending() {
     for (const call of this.platform.workspace.calls())
-      if (call.error?.includes('pending Intelligence sync')) {
+      if (call.error && PENDING_RECEIPT_SYNC.test(call.error)) {
         this.platform.workspace.setCallError(call.id, null);
         await this.syncReceipt(call.id, call.transcript);
       }
