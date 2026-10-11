@@ -1,4 +1,10 @@
-import { parallelSources, type WebConfig, type WebSource } from './parallel.js';
+import {
+  searxngSources,
+  selectedWebSearchProvider,
+  webSearchUnavailableReason,
+  type WebConfig,
+  type WebSource,
+} from './parallel.js';
 import { z } from 'zod';
 import type { Memory, Result } from '../shared/types.js';
 export interface Config extends WebConfig {
@@ -6,8 +12,6 @@ export interface Config extends WebConfig {
   apiKey?: string;
   baseUrl: string;
   model?: string;
-  browserUrl?: string;
-  browserSecret?: string;
 }
 export const browserResponse = z.object({
   title: z.string(),
@@ -42,12 +46,7 @@ export function configured(config: Config): boolean {
   return (
     config.mode === 'sample' ||
     Boolean(
-      config.apiKey &&
-      config.model &&
-      ((config.webSearchProvider ?? 'parallel') === 'parallel' ||
-        (config.webSearchProvider === 'browser' &&
-          config.browserUrl &&
-          config.browserSecret)),
+      config.apiKey && config.model && !webSearchUnavailableReason(config),
     )
   );
 }
@@ -86,29 +85,27 @@ export async function research(
       ],
     };
   }
-  if (!configured(config))
+  if (!config.apiKey || !config.model)
     throw new Error(
-      'Live mode is not configured. Set OPENAI_API_KEY and OPENAI_MODEL; browser research also needs BROWSER_URL and BROWSER_SECRET. Research must not be disabled.',
+      'Live mode is not configured. Set OPENAI_API_KEY and OPENAI_MODEL.',
     );
+  const unavailable = webSearchUnavailableReason(config);
+  if (unavailable) throw new Error(unavailable);
   let pages: WebSource[];
   const limitations: string[] = [];
   let screenshot: string | undefined;
-  if ((config.webSearchProvider ?? 'parallel') === 'parallel') {
-    const urls = requestedUrls(prompt);
-    progress(
-      urls.length
-        ? 'Reading the requested sources with Parallel.'
-        : 'Searching and reading public sources with Parallel.',
-    );
-    pages = await parallelSources(
-      {
-        objective: prompt,
-        urls,
-        onWarning: (message) => {
-          limitations.push(message);
-          progress(message);
-        },
-      },
+  const note = (message: string) => {
+    limitations.push(message);
+    progress(message);
+  };
+  if (selectedWebSearchProvider(config) === 'searxng') {
+    if (requestedUrls(prompt).length)
+      note(
+        'Supplied URLs were not read: the local search engine returns result snippets only. Use WEB_SEARCH_PROVIDER=browser to read one supplied page.',
+      );
+    progress('Searching public sources with the local search engine.');
+    pages = await searxngSources(
+      { objective: prompt, onWarning: note },
       config,
       signal,
     );

@@ -13,6 +13,7 @@ import { ConversationStore } from './conversation-store.js';
 import {
   intelligenceApiKeyFromEnv,
   intelligenceWsUrlFromEnv,
+  searxngUrlFromEnv,
   type PlatformConfig,
 } from './platform-config.js';
 const host = process.env.HOST ?? '127.0.0.1';
@@ -31,6 +32,9 @@ const workspace = new WorkspaceStore(
   database,
   process.env.OWNER_ID ?? 'opendots-owner',
 );
+const searxngUrl = searxngUrlFromEnv(process.env);
+const browserUrl = process.env.BROWSER_URL;
+const browserSecret = process.env.BROWSER_SECRET;
 const config: PlatformConfig = {
   intelligenceKey: intelligenceApiKeyFromEnv(process.env),
   intelligenceApiUrl: process.env.INTELLIGENCE_API_URL || undefined,
@@ -40,10 +44,14 @@ const config: PlatformConfig = {
   baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
   learningExtractorUrl: process.env.LEARNING_EXTRACTOR_URL || undefined,
   learningExtractorModel: process.env.LEARNING_EXTRACTOR_MODEL || undefined,
-  webSearchProvider: webSearchProvider(process.env.WEB_SEARCH_PROVIDER),
-  parallelApiKey: process.env.PARALLEL_API_KEY,
-  browserUrl: process.env.BROWSER_URL,
-  browserSecret: process.env.BROWSER_SECRET,
+  webSearchProvider: webSearchProvider(process.env.WEB_SEARCH_PROVIDER, {
+    searxngUrl,
+    browserUrl,
+    browserSecret,
+  }),
+  searxngUrl,
+  browserUrl,
+  browserSecret,
   computerSupervisorUrl: process.env.COMPUTER_SUPERVISOR_URL,
   computerSupervisorToken: process.env.COMPUTER_SUPERVISOR_TOKEN,
   computerToken: process.env.COMPUTER_TOKEN,
@@ -69,7 +77,7 @@ const researchConfig = {
   model: config.model,
   baseUrl: config.baseUrl,
   webSearchProvider: config.webSearchProvider,
-  parallelApiKey: config.parallelApiKey,
+  searxngUrl: config.searxngUrl,
   browserUrl: config.browserUrl,
   browserSecret: config.browserSecret,
 };
