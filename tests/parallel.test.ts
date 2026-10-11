@@ -1,6 +1,3 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, extname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   exaSourcesFromResponse,
@@ -484,35 +481,113 @@ describe('research with local and optional search', () => {
 });
 
 describe('no Parallel search provider', () => {
-  it('keeps the former search host and key out of code, configuration and docs', () => {
-    const root = fileURLToPath(new URL('..', import.meta.url));
-    const extensions = new Set([
-      '.ts',
-      '.tsx',
-      '.js',
-      '.md',
-      '.yml',
-      '.example',
-    ]);
-    const listFiles = (dir: string): string[] =>
-      readdirSync(dir).flatMap((name) => {
-        const path = join(dir, name);
-        if (statSync(path).isDirectory()) return listFiles(path);
-        return extensions.has(extname(name)) || name === '.env.example'
-          ? [path]
-          : [];
-      });
-    const files = [
-      ...listFiles(join(root, 'src')),
-      ...listFiles(join(root, 'docs')),
-      join(root, '.env.example'),
-      join(root, 'compose.yml'),
-      join(root, 'README.md'),
+  const live = {
+    mode: 'live' as const,
+    apiKey: 'model-key',
+    model: 'test-model',
+    baseUrl: model,
+  };
+  const modelOrigin = 'https://model.example';
+  const browserOrigin = 'http://browser:4311';
+  const exaOrigin = 'https://api.exa.ai';
+
+  it('routes every provider selection only to its configured endpoint, never the removed host', async () => {
+    const scenarios: Array<{
+      label: string;
+      expectedOrigins: string[];
+      run: (fetch: ReturnType<typeof vi.fn>) => Promise<unknown>;
+    }> = [
+      {
+        label: 'SearxNG search',
+        expectedOrigins: [local],
+        run: (fetch) => {
+          vi.stubGlobal('fetch', fetch);
+          return searchSources(
+            { objective: 'Compare topics' },
+            { webSearchProvider: 'searxng', searxngUrl: local },
+            signal,
+          );
+        },
+      },
+      {
+        label: 'Exa search',
+        expectedOrigins: [exaOrigin],
+        run: (fetch) => {
+          vi.stubGlobal('fetch', fetch);
+          return searchSources(
+            { objective: 'Compare topics' },
+            { webSearchProvider: 'exa', exaApiKey: exaKey },
+            signal,
+          );
+        },
+      },
+      {
+        label: 'SearxNG research',
+        expectedOrigins: [local, modelOrigin],
+        run: (fetch) => {
+          vi.stubGlobal('fetch', fetch);
+          return research(
+            'Compare research methods',
+            [],
+            { ...live, webSearchProvider: 'searxng', searxngUrl: local },
+            signal,
+            () => {},
+          );
+        },
+      },
+      {
+        label: 'Exa research',
+        expectedOrigins: [exaOrigin, modelOrigin],
+        run: (fetch) => {
+          vi.stubGlobal('fetch', fetch);
+          return research(
+            'Compare research methods',
+            [],
+            { ...live, webSearchProvider: 'exa', exaApiKey: exaKey },
+            signal,
+            () => {},
+          );
+        },
+      },
+      {
+        label: 'browser research',
+        expectedOrigins: [browserOrigin, modelOrigin],
+        run: (fetch) => {
+          vi.stubGlobal('fetch', fetch);
+          return research(
+            'Summarize https://example.com',
+            [],
+            { ...live, ...browser },
+            signal,
+            () => {},
+          );
+        },
+      },
     ];
-    for (const file of files) {
-      const text = readFileSync(file, 'utf8');
-      expect(text, file).not.toContain('parallel.ai');
-      expect(text, file).not.toContain('PARALLEL_API_KEY');
+
+    for (const scenario of scenarios) {
+      const fetch = vi.fn(async (url: string) => {
+        if (url.startsWith(local)) return searxResponse(hit());
+        if (url.startsWith(exaOrigin)) return exaResponse(exaHit());
+        if (url.startsWith(browserOrigin))
+          return Response.json({
+            title: 'Evidence',
+            url: 'https://example.com',
+            text: 'Read page text.',
+          });
+        if (url.startsWith(modelOrigin)) return modelResponse();
+        throw new Error(`Unexpected search request: ${url}`);
+      });
+      await scenario.run(fetch);
+      const urls = fetch.mock.calls.map(([url]) => String(url));
+      expect(
+        urls.map((url) => new URL(url).origin),
+        scenario.label,
+      ).toEqual(scenario.expectedOrigins);
+      expect(
+        urls.some((url) => url.toLowerCase().includes('parallel')),
+        scenario.label,
+      ).toBe(false);
     }
   });
 });
