@@ -6,6 +6,7 @@ const config: Config = {
   mode: 'live',
   apiKey: 'test',
   model: 'test',
+  webSearchProvider: 'browser',
   browserUrl: 'http://browser:4311',
   browserSecret: 'test',
   baseUrl: 'https://model.example/v1',
@@ -84,7 +85,7 @@ it('checks abort again before sending source evidence or memories to the model',
       config,
       controller.signal,
       (text) => {
-        if (text.startsWith('Source captured')) controller.abort();
+        if (text.startsWith('Sources captured')) controller.abort();
       },
     ),
   ).rejects.toThrow();

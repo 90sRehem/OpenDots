@@ -23,6 +23,38 @@ export function intelligenceWsUrlFromEnv(
   ]);
 }
 
+/** The optional Exa key. It has no effect unless WEB_SEARCH_PROVIDER=exa selects Exa. */
+export function exaApiKeyFromEnv(
+  env: Record<string, string | undefined>,
+): string | undefined {
+  return firstNonEmptyEnvValue(env, ['EXA_API_KEY']);
+}
+
+/** A self-hosted SearxNG base URL, or undefined when search is not configured. */
+export function searxngUrlFromEnv(
+  env: Record<string, string | undefined>,
+): string | undefined {
+  const value = firstNonEmptyEnvValue(env, ['SEARXNG_URL']);
+  if (!value) return undefined;
+  const invalid =
+    'SEARXNG_URL must be an http(s) base URL without credentials, query, or fragment.';
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(invalid);
+  }
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  )
+    throw new Error(invalid);
+  return value.replace(/\/$/, '');
+}
+
 function firstNonEmptyEnvValue(
   env: Record<string, string | undefined>,
   names: readonly string[],
