@@ -61,7 +61,7 @@ async function shutdown(booted: ReturnType<typeof boot>) {
 
 /** A fake Bot API: getMe succeeds, the given batches are returned, then getUpdates waits for abort. */
 function fakeBotApi(batches: unknown[][]) {
-  const calls: Array<{ method: string; url: URL }> = [];
+  const calls: Array<{ method: string; url: URL; body?: unknown }> = [];
   vi.stubGlobal(
     'fetch',
     vi.fn((input: string | URL | Request, init?: RequestInit) => {
@@ -70,7 +70,7 @@ function fakeBotApi(batches: unknown[][]) {
       if (url.hostname !== 'api.telegram.org')
         return Promise.reject(new Error('non-Telegram request blocked'));
       const method = url.pathname.split('/').pop() ?? '';
-      calls.push({ method, url });
+      calls.push({ method, url, body: init?.body });
       if (method === 'getMe')
         return Promise.resolve(
           Response.json({ ok: true, result: { id: 1, is_bot: true } }),
@@ -204,3 +204,88 @@ it('does not start polling when TELEGRAM_DOT_ID names no Dot', async () => {
   expect(calls).toEqual([]);
   await shutdown(booted);
 });
+
+function sentMessages(calls: ReturnType<typeof fakeBotApi>) {
+  return calls
+    .filter(({ method }) => method === 'sendMessage')
+    .map(({ body }) => JSON.parse(String(body)));
+}
+
+const RESEND_NOTICE =
+  'A previous run was interrupted. Please resend your message to continue.';
+
+it('tells the owner to resend when a Telegram run was interrupted at boot, once', async () => {
+  vi.stubEnv('DO_NOT_TRACK', '1');
+  const database = tempDatabase();
+  // A previous process admitted a Telegram turn and exited before finishing it.
+  const previousWorkspace = new WorkspaceStore(database, 'owner');
+  const previousConversations = new ConversationStore(database);
+  const dot = previousWorkspace.dots()[0];
+  previousWorkspace.bindThread(
+    'telegram-2002',
+    dot.id,
+    'Telegram conversation',
+  );
+  previousConversations.admitTurn({
+    source: 'channel_owner',
+    threadId: 'telegram-2002',
+    dotId: dot.id,
+    ownerId: previousWorkspace.ownerId,
+    role: 'user',
+    content: { id: 'interrupted-message', role: 'user', content: 'hello' },
+  });
+  previousConversations.close();
+  previousWorkspace.close();
+
+  // Platform's constructor marks that run interrupted before the connector starts.
+  const first = boot(database, telegram);
+  const firstCalls = fakeBotApi([]);
+  await first.platform.start();
+  await vi.waitFor(() =>
+    expect(firstCalls.some(({ method }) => method === 'getUpdates')).toBe(true),
+  );
+  expect(sentMessages(firstCalls)).toEqual([
+    { chat_id: 1001, text: RESEND_NOTICE },
+  ]);
+  await shutdown(first);
+
+  // A later restart must not repeat the notice for the same run.
+  const second = boot(database, telegram);
+  const secondCalls = fakeBotApi([]);
+  await second.platform.start();
+  await vi.waitFor(() =>
+    expect(secondCalls.some(({ method }) => method === 'getUpdates')).toBe(
+      true,
+    ),
+  );
+  expect(sentMessages(secondCalls)).toEqual([]);
+  await shutdown(second);
+}, 20000);
+
+it('never sends Telegram notices for web conversation runs interrupted at boot', async () => {
+  vi.stubEnv('DO_NOT_TRACK', '1');
+  const database = tempDatabase();
+  const previousWorkspace = new WorkspaceStore(database, 'owner');
+  const previousConversations = new ConversationStore(database);
+  const dot = previousWorkspace.dots()[0];
+  previousWorkspace.bindThread('web-thread', dot.id, 'Web conversation');
+  previousConversations.admitTurn({
+    source: 'web_owner',
+    threadId: 'web-thread',
+    dotId: dot.id,
+    ownerId: previousWorkspace.ownerId,
+    role: 'user',
+    content: { id: 'web-message', role: 'user', content: 'hello' },
+  });
+  previousConversations.close();
+  previousWorkspace.close();
+
+  const booted = boot(database, telegram);
+  const calls = fakeBotApi([]);
+  await booted.platform.start();
+  await vi.waitFor(() =>
+    expect(calls.some(({ method }) => method === 'getUpdates')).toBe(true),
+  );
+  expect(sentMessages(calls)).toEqual([]);
+  await shutdown(booted);
+}, 20000);

@@ -24,7 +24,7 @@ import {
 } from './conversation-store.js';
 import { detectLearningCandidate } from './learning.js';
 
-const RESTART_INTERRUPT_REASON =
+export const RESTART_INTERRUPT_REASON =
   'Run interrupted because the server process restarted. Review completed effects before retrying.';
 const STOP_INTERRUPT_REASON =
   'Run stopped by request. Review completed effects before retrying.';
