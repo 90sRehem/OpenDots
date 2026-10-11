@@ -253,7 +253,7 @@ export class TelegramChannel {
           this.store.finishRun(
             run.id,
             'interrupted',
-            'Run interrupted by process restart.',
+            RESTART_INTERRUPT_REASON,
           );
         } else if (!this.restartNoticeOwed(run)) {
           continue;
