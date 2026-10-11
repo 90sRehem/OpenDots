@@ -23,6 +23,13 @@ export function intelligenceWsUrlFromEnv(
   ]);
 }
 
+/** The optional Exa key. It has no effect unless WEB_SEARCH_PROVIDER=exa selects Exa. */
+export function exaApiKeyFromEnv(
+  env: Record<string, string | undefined>,
+): string | undefined {
+  return firstNonEmptyEnvValue(env, ['EXA_API_KEY']);
+}
+
 /** A self-hosted SearxNG base URL, or undefined when search is not configured. */
 export function searxngUrlFromEnv(
   env: Record<string, string | undefined>,

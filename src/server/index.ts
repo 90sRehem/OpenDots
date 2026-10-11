@@ -13,6 +13,7 @@ import { ConversationStore } from './conversation-store.js';
 import {
   intelligenceApiKeyFromEnv,
   intelligenceWsUrlFromEnv,
+  exaApiKeyFromEnv,
   searxngUrlFromEnv,
   type PlatformConfig,
 } from './platform-config.js';
@@ -33,6 +34,7 @@ const workspace = new WorkspaceStore(
   process.env.OWNER_ID ?? 'opendots-owner',
 );
 const searxngUrl = searxngUrlFromEnv(process.env);
+const exaApiKey = exaApiKeyFromEnv(process.env);
 const browserUrl = process.env.BROWSER_URL;
 const browserSecret = process.env.BROWSER_SECRET;
 const config: PlatformConfig = {
@@ -50,6 +52,7 @@ const config: PlatformConfig = {
     browserSecret,
   }),
   searxngUrl,
+  exaApiKey,
   browserUrl,
   browserSecret,
   computerSupervisorUrl: process.env.COMPUTER_SUPERVISOR_URL,
@@ -78,6 +81,7 @@ const researchConfig = {
   baseUrl: config.baseUrl,
   webSearchProvider: config.webSearchProvider,
   searxngUrl: config.searxngUrl,
+  exaApiKey: config.exaApiKey,
   browserUrl: config.browserUrl,
   browserSecret: config.browserSecret,
 };

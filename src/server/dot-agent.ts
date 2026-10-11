@@ -1,5 +1,6 @@
 import {
-  searxngSources,
+  isSearchEngine,
+  searchSources,
   selectedWebSearchProvider,
   webSearchUnavailableReason,
 } from './parallel.js';
@@ -211,7 +212,7 @@ export class DotAgent extends AbstractAgent {
         if (
           dot.researchAllowed &&
           initialSettings.researchAllowed &&
-          selectedWebSearchProvider(this.config) === 'searxng' &&
+          isSearchEngine(selectedWebSearchProvider(this.config)) &&
           !webSearchUnavailableReason(this.config)
         ) {
           const capture = async (
@@ -220,7 +221,7 @@ export class DotAgent extends AbstractAgent {
           ) => {
             const limitations: string[] = [];
             check();
-            const sources = await searxngSources(
+            const sources = await searchSources(
               {
                 objective,
                 searchQueries,
@@ -251,7 +252,7 @@ export class DotAgent extends AbstractAgent {
             defineTool({
               name: 'search_web',
               description:
-                'Search public web sources through the self-hosted search engine and return result snippets with source URLs for citations. Sends the question only to the configured SearxNG instance.',
+                'Search public web sources through the configured search engine and return result snippets with source URLs for citations. Sends the question only to that configured engine.',
               parameters: z.object({
                 objective: z.string().min(1).max(4000),
                 search_queries: z

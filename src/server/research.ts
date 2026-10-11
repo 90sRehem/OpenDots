@@ -1,5 +1,7 @@
 import {
-  searxngSources,
+  isSearchEngine,
+  searchEngineLabel,
+  searchSources,
   selectedWebSearchProvider,
   webSearchUnavailableReason,
   type WebConfig,
@@ -98,13 +100,14 @@ export async function research(
     limitations.push(message);
     progress(message);
   };
-  if (selectedWebSearchProvider(config) === 'searxng') {
+  const provider = selectedWebSearchProvider(config);
+  if (isSearchEngine(provider)) {
     if (requestedUrls(prompt).length)
       note(
-        'Supplied URLs were not read: the local search engine returns result snippets only. Use WEB_SEARCH_PROVIDER=browser to read one supplied page.',
+        'Supplied URLs were not read: search returns result snippets only. Use WEB_SEARCH_PROVIDER=browser to read one supplied page.',
       );
-    progress('Searching public sources with the local search engine.');
-    pages = await searxngSources(
+    progress(`Searching public sources with ${searchEngineLabel(provider)}.`);
+    pages = await searchSources(
       { objective: prompt, onWarning: note },
       config,
       signal,

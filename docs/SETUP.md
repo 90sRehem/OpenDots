@@ -114,7 +114,18 @@ SEARXNG_URL=http://127.0.0.1:8080
 
 OpenDots sends search queries only to `SEARXNG_URL` and returns result titles, snippets, and source URLs as citations. It does not fetch result pages, so search-based research works from snippets. Use the browser reader below to read one supplied page. Compose deployments must set `SEARXNG_URL` to an address the app container can reach. See [public-web research](../README.md#public-web-research) for data sharing, permissions and limitations.
 
-`WEB_SEARCH_PROVIDER` selects `searxng`, `browser` (the URL-only reader), or `disabled`. When it is unset, OpenDots chooses `searxng` if `SEARXNG_URL` is set, `browser` if `BROWSER_URL` and `BROWSER_SECRET` are set, and `disabled` otherwise. With nothing configured, search reports itself unavailable and the rest of the app works normally. Selecting `searxng` without `SEARXNG_URL` also reports search unavailable. The former third-party provider value `parallel` is rejected at startup.
+`WEB_SEARCH_PROVIDER` selects `searxng`, `exa`, `browser` (the URL-only reader), or `disabled`. When it is unset, OpenDots chooses `searxng` if `SEARXNG_URL` is set, `browser` if `BROWSER_URL` and `BROWSER_SECRET` are set, and `disabled` otherwise. Exa is never chosen automatically. With nothing configured, search reports itself unavailable and the rest of the app works normally. Selecting `searxng` without `SEARXNG_URL`, or `exa` without `EXA_API_KEY`, also reports search unavailable. The former third-party provider value `parallel` is rejected at startup.
+
+### Optional Exa search
+
+Exa is an opt-in third-party search provider. It is used only when you set both `WEB_SEARCH_PROVIDER=exa` and your own `EXA_API_KEY` on the server:
+
+```sh
+WEB_SEARCH_PROVIDER=exa
+EXA_API_KEY=your-exa-key
+```
+
+Search queries are sent to `https://api.exa.ai/search` with that key. Exa returns the same kind of result as SearxNG: titles, highlights, and source URLs, mapped to the same citation shape, so research output does not depend on the provider. Exa's page highlights are excerpts; OpenDots does not fetch the pages. Keep the key in `.env` only, never in client code or source control.
 
 The browser service reads a supplied public URL and returns page text and a capture. Configure `BROWSER_URL` and `BROWSER_SECRET`, then run:
 
