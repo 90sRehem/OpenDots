@@ -440,7 +440,8 @@ export function WorkspaceDialog({
                   .
                 </p>
                 <p>
-                  Setup and usage metadata is collected by default.{' '}
+                  Local setup events are never sent to a hosted telemetry
+                  service.{' '}
                   <a
                     href="https://github.com/CopilotKit/OpenDots/blob/main/docs/SETUP-TELEMETRY.md"
                     target="_blank"
