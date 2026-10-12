@@ -157,7 +157,7 @@ Conversation messages, tool calls, and run events are persisted in the local SQL
 
 The configured model provider receives conversation context, including authorized page content and tool results. Public-web search sends queries only to the self-hosted SearxNG instance named by `SEARXNG_URL`, or to Exa only when you explicitly choose `WEB_SEARCH_PROVIDER=exa` with your own `EXA_API_KEY`; set `WEB_SEARCH_PROVIDER=disabled` to turn these tools off. Speech and messaging integrations send data to their configured providers when used.
 
-OpenDots does not use a hosted Intelligence service or send runtime usage telemetry to CopilotKit. Browser setup events have no transport, so they are discarded and not retained; `COPILOTKIT_TELEMETRY_DISABLED=true` or `DO_NOT_TRACK=1` disables their collection. See [browser setup events](docs/SETUP-TELEMETRY.md) and [telemetry](docs/TELEMETRY.md). Review the policies and retention settings of each model, speech, messaging, and search service you configure.
+OpenDots does not use a hosted Intelligence service or send runtime usage telemetry to CopilotKit. Browser setup events are held only in a bounded local SQLite queue and discarded at the next flush (on startup and about every 15 seconds); they are never sent anywhere and are not retained as usage history. A local last-step marker can persist for abandonment recovery. `COPILOTKIT_TELEMETRY_DISABLED=true` or `DO_NOT_TRACK=1` disables their collection and clears pending setup events. See [browser setup events](docs/SETUP-TELEMETRY.md) and [telemetry](docs/TELEMETRY.md). Review the policies and retention settings of each model, speech, messaging, and search service you configure.
 
 ## Features
 
