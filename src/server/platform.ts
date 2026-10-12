@@ -101,8 +101,7 @@ export class Platform {
     conversationStore.interruptRunningLearningJobs();
     const runtime = new CopilotRuntime({
       runner: this.runner,
-      telemetryId: this.setupTelemetry.identity,
-      telemetryProperties: this.setupTelemetry.metadata,
+      ɵtelemetry: { capture: async () => {} },
       identifyUser: async () => ({
         id: workspace.ownerId,
         name: 'OpenDots owner',

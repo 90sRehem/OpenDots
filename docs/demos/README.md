@@ -21,7 +21,7 @@ The README embeds compact GIF versions. MP4 versions are included for playback a
 
 Scout opens the website in its existing OpenBot computer. CopilotKit `useRenderTool` displays the browser inline, and `useHumanInTheLoop` presents the draft with **Approve & save** and **Decline**. The recording shows approval, the saved-page receipt, and the finished Space page. The page also survived a reload after recording.
 
-Approval uses an owner-authenticated route, checks the Dot's current Space access, and deduplicates saves by thread and tool call. Reconnecting recovers an existing approval before offering a new decision. Slack does not receive this web-only review tool.
+Approval uses an owner-authenticated route, checks the Dot's current Space access, and deduplicates saves by thread and tool call. Reconnecting recovers an existing approval before offering a new decision. This review tool is available only in web chat.
 
 ## Chat-driven computer demo
 
@@ -46,7 +46,7 @@ The final recording was captured after correcting host-to-supervisor networking 
 - A saved workspace file retained identical contents across a stop/start (checked separately from the recording).
 - Browser work resumed after restart using a fresh snapshot.
 
-Slack is not demonstrated. Spoken compute delegation and full interruption behavior still need dedicated live checks.
+Telegram is not demonstrated. Spoken compute delegation and full interruption behavior still need dedicated live checks.
 
 ## Voice call UI test
 

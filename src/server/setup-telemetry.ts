@@ -81,18 +81,7 @@ const names: Record<SetupEvent['kind'], string> = {
 type Diagnostic =
   'delivery_failed' | 'storage_failed' | 'invalid_state' | 'invalid_event';
 type Send = (identity: string, body: Record<string, unknown>) => Promise<void>;
-const productionSend: Send = async (identity, body) => {
-  const response = await fetch('https://telemetry.copilotkit.ai/ingest', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-CopilotKit-Telemetry-Id': identity,
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(1500),
-  });
-  if (!response.ok) throw new Error('Telemetry delivery failed');
-};
+const localOnlySend: Send = async () => {};
 
 /** Installation-scoped state contains closed metadata only; credentials never enter it. */
 export class SetupTelemetry {
@@ -102,7 +91,7 @@ export class SetupTelemetry {
   constructor(
     private store: Store,
     private env: NodeJS.ProcessEnv = process.env,
-    private send: Send = productionSend,
+    private send: Send = localOnlySend,
     private report: (diagnostic: Diagnostic) => void = (diagnostic) =>
       console.error({
         error: diagnostic,
@@ -126,10 +115,7 @@ export class SetupTelemetry {
             activated: false,
             queue: [],
           };
-      // The CLI identity remains authoritative, including queued events on replay.
-      this.state.identity = this.env.CPK_TELEMETRY_ID?.trim()
-        ? this.env.CPK_TELEMETRY_ID
-        : this.state.installationId;
+      this.state.identity = this.state.installationId;
       if (this.state.lastStep && !this.state.activated) {
         const last = this.state.lastStep;
         this.capture({ kind: 'setup_abandoned', step: last });

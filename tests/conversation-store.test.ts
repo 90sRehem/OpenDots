@@ -199,7 +199,7 @@ describe('connector_inbound uniqueness', () => {
   it('allows the same update_id across different platforms', () => {
     const { store } = fixture();
     expect(store.admitInbound('telegram', 'update-1', 1)).toBe(true);
-    expect(store.admitInbound('slack', 'update-1', 1)).toBe(true);
+    expect(store.admitInbound('other', 'update-1', 1)).toBe(true);
   });
 });
 
