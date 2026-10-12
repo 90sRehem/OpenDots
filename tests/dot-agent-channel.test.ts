@@ -186,7 +186,7 @@ it('preserves normal channel text and existing web error behavior', async () => 
   );
 });
 
-it('exposes only the canonical review tool to web chat and none to Slack', async () => {
+it('exposes only the canonical review tool to web chat', async () => {
   const run = {
     type: EventType.RUN_FINISHED,
     threadId: 'thread',
@@ -215,13 +215,6 @@ it('exposes only the canonical review tool to web chat and none to Slack', async
       ],
       forwardedProps: {},
     }),
-  );
-  const slack = fixture(true);
-  await lastValueFrom(
-    slack.agent.run({ ...slack.input, tools: offered }).pipe(toArray()),
-  );
-  expect(inner.run).toHaveBeenLastCalledWith(
-    expect.objectContaining({ tools: [] }),
   );
 });
 

@@ -15,7 +15,7 @@ import {
   answerObserver,
 } from '../src/server/setup-telemetry.js';
 
-it('persists bounded offline events with stable IDs and CLI identity across restart', async () => {
+it('persists bounded offline events with stable IDs and installation identity across restart', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'opendots-telemetry-'));
   const path = join(dir, 'store.sqlite');
   let store = new Store(path);
@@ -23,7 +23,7 @@ it('persists bounded offline events with stable IDs and CLI identity across rest
     throw new Error('secret transport error');
   });
   const diagnostics = vi.fn();
-  const env = { CPK_TELEMETRY_ID: 'cli-identity' };
+  const env = {};
   let telemetry = new SetupTelemetry(store, env, offline, diagnostics);
   for (let i = 0; i < 260; i++)
     telemetry.capture({ kind: 'step_viewed', step: 'ready' });
@@ -45,7 +45,7 @@ it('persists bounded offline events with stable IDs and CLI identity across rest
     diagnostics,
   );
   await telemetry.flush();
-  expect(requests[0].identity).toBe('cli-identity');
+  expect(requests[0].identity).toBe(installationId);
   expect(requests[0].body).toMatchObject({ ts: state.queue[1].occurredAt });
   expect(state.queue[1].occurredAt).toBeLessThan(100_000_000_000);
   expect(requests[0].body).toMatchObject({
@@ -241,25 +241,11 @@ it('does not activate from user text, partial answers or tool-only success', () 
   expect(capture).not.toHaveBeenCalled();
 });
 
-it('uses installation fallback after a CLI identity is removed, and never loses CLI precedence', () => {
+it('reuses the installation identity across instances', () => {
   const store = new Store(':memory:');
-  const cli = new SetupTelemetry(
-    store,
-    { CPK_TELEMETRY_ID: 'cli-one' },
-    async () => {},
-  );
-  expect(cli.identity).toBe('cli-one');
-  const fallback = new SetupTelemetry(store, {}, async () => {});
-  expect(fallback.identity).toBe(cli.metadata.installation_id);
-  const replacement = new SetupTelemetry(
-    store,
-    { CPK_TELEMETRY_ID: 'cli-two' },
-    async () => {},
-  );
-  expect(replacement.identity).toBe('cli-two');
-  expect(replacement.metadata.installation_id).toBe(
-    cli.metadata.installation_id,
-  );
+  const first = new SetupTelemetry(store, {}, async () => {});
+  const second = new SetupTelemetry(store, {}, async () => {});
+  expect(second.identity).toBe(first.metadata.installation_id);
   store.close();
 });
 

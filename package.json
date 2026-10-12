@@ -1,7 +1,7 @@
 {
   "name": "opendots",
   "version": "0.1.0",
-  "description": "A self-hosted personal-agent template.",
+  "description": "A self-hosted AI workspace with a local transcript and Telegram connector; no Intelligence service or Slack.",
   "main": "index.js",
   "directories": {
     "doc": "docs",
@@ -26,7 +26,6 @@
   "dependencies": {
     "@ag-ui/client": "^0.0.59",
     "@ag-ui/core": "^0.0.59",
-    "@copilotkit/channels": "^0.11.0",
     "@copilotkit/core": "^1.75.0",
     "@copilotkit/react-core": "^1.75.0",
     "@copilotkit/runtime": "^1.75.0",

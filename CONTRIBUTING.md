@@ -1,6 +1,6 @@
 # Contributing to OpenDots
 
-OpenDots is an application template in early development. Focus changes on Spaces, Specialist Dots, text and calls, Slack, and inspectable background work. Keep the documented SDK integrations functional and report missing configuration clearly.
+OpenDots is an application template in early development. Focus changes on Spaces, Specialist Dots, web chat, calls, Telegram, and inspectable background work. Keep the shipped integrations functional and report missing configuration clearly.
 
 For bugs, include the app mode, Node version, steps to reproduce, expected behavior, and actual behavior. Remove credentials and private page content from logs or screenshots.
 

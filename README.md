@@ -2,9 +2,9 @@
 
 # OpenDots
 
-### Always-on AI coworkers that move between text, calls, and Slack.
+### A self-hosted AI workspace for web chat, calls, and Telegram.
 
-**An open-source template for persistent AI agents, each with its own computer. Available on Web and Mobile.**
+**An open-source template with a local conversation transcript and no hosted Intelligence service or Slack connector.**
 
 Built with [CopilotKit](https://github.com/CopilotKit/CopilotKit) and [AG-UI](https://docs.ag-ui.com/introduction). · [Get started](#get-started) · [Overview](#overview) · [Architecture](#architecture) · [Features](#features) · [Contributing](CONTRIBUTING.md)
 
@@ -106,22 +106,6 @@ https://github.com/user-attachments/assets/3c06cf71-39ed-4e2b-b846-5463b2722389
 
 _Connect, talk, mute, minimize, and return to chat. This is a silent screen capture of a real call, with waiting time trimmed and playback accelerated._
 
-### Slack
-
-Mention a Dot through a managed Slack connection using Channels SDK, then continue in its thread. The integration follows [OpenTag](https://github.com/CopilotKit/OpenTag), with an explicit workspace/user allowlist and a selected specialist. See [Slack setup](docs/SETUP.md#slack) to connect your deployment.
-
-<div align="center">
-
-<table><tr><td>
-
-https://github.com/user-attachments/assets/27d03a6c-a9e0-4c29-8d96-fafe0fbae20f
-
-</td></tr></table>
-
-</div>
-
-Bring your agents into Slack with [Channels SDK](https://github.com/CopilotKit/channels-sdk).
-
 ## Architecture
 
 ### AG-UI connects the agent to the interface
@@ -133,9 +117,6 @@ The template uses TanStack AI for model streaming and server-tool execution and 
 ```mermaid
 flowchart TB
   Web["Web app: pages, Spaces, Dots, chat"] -->|AG-UI| Runtime[CopilotKit runtime]
-  Slack[Slack] <--> Managed[Managed channel connection]
-  Managed <--> Channels[Channels SDK]
-  Channels --> Agents[Specialist compute agents]
   Runtime --> Agents
   Agents --> AI[TanStack AI]
   AI --> Provider[OpenAI-compatible model provider]
@@ -168,7 +149,7 @@ Open **http://127.0.0.1:5173**. You can create Spaces, write pages, and configur
 
 Calls need the speech variables described in [Calls](docs/SETUP.md#calls). Do not run `copilotkit onboard` in this folder. OpenDots already contains its CopilotKit integration, and onboarding adds a second, generic one.
 
-See [Setup](docs/SETUP.md) for configuration, Slack, calls, the browser service, and Docker.
+See [Setup](docs/SETUP.md) for configuration, Telegram, calls, the browser service, and Docker.
 
 ## Data and privacy
 
@@ -176,7 +157,7 @@ Conversation messages, tool calls, and run events are persisted in the local SQL
 
 The configured model provider receives conversation context, including authorized page content and tool results. Public-web search sends queries only to the self-hosted SearxNG instance named by `SEARXNG_URL`, or to Exa only when you explicitly choose `WEB_SEARCH_PROVIDER=exa` with your own `EXA_API_KEY`; set `WEB_SEARCH_PROVIDER=disabled` to turn these tools off. Speech and messaging integrations send data to their configured providers when used.
 
-CopilotKit SDK telemetry collects usage metadata separately from conversation persistence. OpenDots also records bounded browser setup stages and first successful assistant activation with a random installation ID; the same opt-out flags disable this tracking and purge pending setup events. See [browser setup telemetry](docs/SETUP-TELEMETRY.md). Runtime events are tagged `OpenDots`; see [usage tracking](docs/TELEMETRY.md). Set `COPILOTKIT_TELEMETRY_DISABLED=true` or `DO_NOT_TRACK=1` to opt out; see [CopilotKit telemetry](https://docs.copilotkit.ai/telemetry). Review [CopilotKit's privacy policy](https://www.copilotkit.ai/privacy-policy) and the policies and retention settings of each service you configure.
+OpenDots does not use a hosted Intelligence service or send runtime usage telemetry to CopilotKit. Bounded browser setup events remain local to the application database; `COPILOTKIT_TELEMETRY_DISABLED=true` or `DO_NOT_TRACK=1` disables their collection and clears pending setup events. See [browser setup events](docs/SETUP-TELEMETRY.md) and [telemetry](docs/TELEMETRY.md). Review the policies and retention settings of each model, speech, messaging, and search service you configure.
 
 ## Features
 
@@ -185,7 +166,6 @@ CopilotKit SDK telemetry collects usage metadata separately from conversation pe
 | Spaces and Specialist Dots | Saved names, role instructions, and per-Dot research and memory permissions                                                |
 | Pages                      | Searchable library, visual editor, slash commands, autosave, and revision checks                                           |
 | Conversations              | React SDK chat and Threads integration, page-specific conversations, and source links                                      |
-| Slack                      | Managed Channels SDK declaration with workspace and user allowlists                                                        |
 | Calls                      | WebRTC speech, delegated compute, bounded sessions, hangup, and timeline receipts                                          |
 | Background work            | Scheduled server-side turns in their original conversation, with pause and retry controls                                  |
 | Browser                    | Separate read-only public-page service with page capture and navigation limits                                             |
@@ -198,7 +178,7 @@ CopilotKit SDK telemetry collects usage metadata separately from conversation pe
 
 Scheduled tasks run in their original conversation. If a worker stops or its lease expires during a run, OpenDots marks that run **Interrupted** and waits for an explicit retry. Review its pages and computer actions, then use **Retry after review** when appropriate. Completed effects may already be present even when a run has no final result.
 
-Local checks cover setup, persistence, permissions, SDK failure handling, and browser isolation. Automated tests use service fixtures. **Live model responses and page-context chat were verified on September 29, 2026.** Live OpenBot computer browsing, file creation, shell verification, and file persistence across stop/start were also verified locally. Live Realtime speech, call controls, and receipt persistence were verified locally on September 30, 2026. Slack and spoken compute delegation still need connected-service verification. See [recording notes](docs/demos/README.md) for the demonstrated flows and limits.
+Local checks cover setup, persistence, permissions, SDK failure handling, and browser isolation. Automated tests use service fixtures. **Live model responses and page-context chat were verified on September 29, 2026.** Live OpenBot computer browsing, file creation, shell verification, and file persistence across stop/start were also verified locally. Live Realtime speech, call controls, and receipt persistence were verified locally on September 30, 2026. Telegram and spoken compute delegation need connected-service verification. See [recording notes](docs/demos/README.md) for the demonstrated flows and limits.
 
 Automatic Learning stores proposed skills and their review states locally and delivers only active, approved versions; delivery uses no separate service credential. Existing conversations are not enrolled retroactively, and turning off delivery does not stop evidence collection.
 
@@ -220,10 +200,8 @@ See [Contributing](CONTRIBUTING.md) for development guidance and [Security](SECU
 
 - [AG-UI documentation](https://docs.ag-ui.com/introduction)
 - [CopilotKit documentation](https://docs.copilotkit.ai/)
-- [Channels SDK](https://github.com/CopilotKit/channels-sdk)
 - [OpenMuse](https://github.com/CopilotKit/OpenMuse)
 - [OpenBot](https://github.com/CopilotKit/openbot)
-- [OpenTag](https://github.com/CopilotKit/OpenTag) — Channels SDK integration reference
 
 ## License
 
